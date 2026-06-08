@@ -11,6 +11,11 @@ echo Backend: http://127.0.0.1:8010
 echo Press Ctrl+C to stop this service.
 echo.
 
+if not defined DEEPSEEK_API_KEY if not defined ASSIST_API_KEY (
+  echo [INFO] DEEPSEEK_API_KEY is not set. Transcription will work, but the default LiteLLM assist provider will not be ready.
+  echo.
+)
+
 "%CONDA_EXE%" run -n "%CONDA_ENV%" python -c "import faster_whisper, requests, yt_dlp" >nul 2>nul
 if errorlevel 1 (
   echo [ERROR] Backend dependencies are incomplete.

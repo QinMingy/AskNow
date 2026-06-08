@@ -4,6 +4,22 @@
 
 ## 基础配置
 
+项目默认使用 DeepSeek via LiteLLM：
+
+```powershell
+$env:DEEPSEEK_API_KEY="你的 DeepSeek API Key"
+.\start_demo.bat
+```
+
+默认值：
+
+- `ASSIST_PROVIDER=litellm`
+- `ASSIST_BASE_URL=https://api.deepseek.com/v1`
+- `ASSIST_MODEL=deepseek-v4-flash`
+- `ASSIST_API_KEY` 默认读取 `DEEPSEEK_API_KEY`
+
+如果要手动切换其他供应商，可以覆盖这些环境变量：
+
 ```powershell
 $env:ASSIST_PROVIDER="litellm"
 $env:ASSIST_MODEL="openai/gpt-4o-mini"

@@ -85,6 +85,7 @@
 - [x] 增加 provider 配置说明
 - [x] 接入 LiteLLM 多供应商 provider
 - [x] 增加 LiteLLM 配置与测试说明
+- [x] 默认使用 DeepSeek LiteLLM 配置
 
 ## 后续演进
 

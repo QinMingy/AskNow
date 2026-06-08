@@ -45,10 +45,12 @@ def get_assist_provider_status(settings: Settings) -> AssistProviderStatus:
         )
 
     if provider in {"litellm", "lite_llm"}:
-        required = ["ASSIST_MODEL", "litellm package"]
+        required = ["ASSIST_MODEL", "DEEPSEEK_API_KEY or ASSIST_API_KEY", "litellm package"]
         missing = []
         if not settings.assist_model:
             missing.append("ASSIST_MODEL")
+        if not settings.assist_api_key:
+            missing.append("DEEPSEEK_API_KEY or ASSIST_API_KEY")
         if importlib.util.find_spec("litellm") is None:
             missing.append("litellm package")
 
@@ -67,7 +69,7 @@ def get_assist_provider_status(settings: Settings) -> AssistProviderStatus:
             missing=missing,
             details=details,
             next_step=(
-                "Install LiteLLM and set ASSIST_MODEL before starting the backend."
+                "Install LiteLLM and set DEEPSEEK_API_KEY or ASSIST_API_KEY before starting the backend."
                 if missing
                 else "LiteLLM configuration is complete. Test with a short /api/assist request."
             ),

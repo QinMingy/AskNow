@@ -10,7 +10,7 @@ from app.assistant import (
     RuleBasedAssistProvider,
     UnderstandingAssistant,
 )
-from app.main import app
+from app.main import app, get_understanding_assistant
 from app.schemas import AssistRequest, TranscriptSegment
 
 
@@ -77,16 +77,22 @@ def test_actions_extracts_possible_followups():
 
 
 def test_assist_api_returns_structured_result():
+    app.dependency_overrides[get_understanding_assistant] = lambda: UnderstandingAssistant(
+        RuleBasedAssistProvider()
+    )
     client = TestClient(app)
 
-    response = client.post(
-        "/api/assist",
-        json={
-            "action": "catchup",
-            "window_seconds": 180,
-            "segments": [segment.model_dump() for segment in sample_segments()],
-        },
-    )
+    try:
+        response = client.post(
+            "/api/assist",
+            json={
+                "action": "catchup",
+                "window_seconds": 180,
+                "segments": [segment.model_dump() for segment in sample_segments()],
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
 
     assert response.status_code == 200
     assert response.json()["action"] == "catchup"
