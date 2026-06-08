@@ -46,6 +46,7 @@ class AssistRequest(BaseModel):
 
 class AssistResponse(BaseModel):
     action: AssistAction
+    provider: str
     title: str
     summary: str
     bullets: list[str]
@@ -58,5 +59,6 @@ class HealthResponse(BaseModel):
     api_version: str
     asr_engine: str
     device: str
+    assist_provider: str
     supported_video_sources: list[str]
     browser_cookie_sources: list[str]

@@ -79,7 +79,13 @@
 - [x] 前端按钮接入真实接口
 - [x] 补充后端测试
 - [x] 运行测试
+- [x] 抽象 `AssistProvider`
+- [x] 保留默认规则式 provider
+- [x] 增加 OpenAI-compatible 本地模型 provider
+- [x] 增加 provider 配置说明
+- [x] 接入 LiteLLM 多供应商 provider
+- [x] 增加 LiteLLM 配置与测试说明
 
 ## 后续演进
 
-后续接入 LLM 时，只需要替换或扩展 `UnderstandingAssistant` 的内部实现，保持 `/api/assist` 请求和响应结构稳定。
+后续如果要接入更具体的本地模型，只需要实现新的 `AssistProvider`，或通过 `ASSIST_PROVIDER=openai_compatible` 对接 Ollama、LM Studio、vLLM 等兼容 OpenAI Chat Completions 的本地服务。`/api/assist` 请求和响应结构保持稳定。

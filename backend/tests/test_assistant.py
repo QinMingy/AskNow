@@ -1,6 +1,15 @@
 from fastapi.testclient import TestClient
 
-from app.assistant import UnderstandingAssistant
+import pytest
+import httpx
+
+from app.assistant import (
+    AssistProviderFactory,
+    LiteLLMAssistProvider,
+    OpenAICompatibleAssistProvider,
+    RuleBasedAssistProvider,
+    UnderstandingAssistant,
+)
 from app.main import app
 from app.schemas import AssistRequest, TranscriptSegment
 
@@ -32,7 +41,7 @@ def sample_segments() -> list[TranscriptSegment]:
 
 
 def test_explain_uses_recent_window():
-    assistant = UnderstandingAssistant()
+    assistant = UnderstandingAssistant(RuleBasedAssistProvider())
 
     response = assistant.assist(
         AssistRequest(action="explain", segments=sample_segments(), window_seconds=30)
@@ -45,7 +54,7 @@ def test_explain_uses_recent_window():
 
 
 def test_question_returns_user_confirmable_drafts():
-    assistant = UnderstandingAssistant()
+    assistant = UnderstandingAssistant(RuleBasedAssistProvider())
 
     response = assistant.assist(
         AssistRequest(action="question", segments=sample_segments())
@@ -57,7 +66,7 @@ def test_question_returns_user_confirmable_drafts():
 
 
 def test_actions_extracts_possible_followups():
-    assistant = UnderstandingAssistant()
+    assistant = UnderstandingAssistant(RuleBasedAssistProvider())
 
     response = assistant.assist(
         AssistRequest(action="actions", segments=sample_segments())
@@ -81,6 +90,7 @@ def test_assist_api_returns_structured_result():
 
     assert response.status_code == 200
     assert response.json()["action"] == "catchup"
+    assert response.json()["provider"] == "rule_based"
     assert response.json()["title"] == "缺席补偿摘要"
     assert response.json()["bullets"]
 
@@ -94,3 +104,126 @@ def test_assist_api_rejects_unknown_action():
     )
 
     assert response.status_code == 422
+
+
+def test_provider_factory_creates_rule_provider():
+    provider = AssistProviderFactory.create("rule-based")
+
+    assert isinstance(provider, RuleBasedAssistProvider)
+
+
+def test_provider_factory_rejects_unknown_provider():
+    with pytest.raises(ValueError, match="Unsupported assist provider"):
+        AssistProviderFactory.create("unknown")
+
+
+def test_openai_compatible_provider_converts_json_response():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["auth"] = request.headers.get("authorization")
+        body = json_loads(request.content)
+        seen["model"] = body["model"]
+        seen["messages"] = body["messages"]
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"title":"LLM解释","summary":"这是模型生成的摘要",'
+                                '"bullets":["要点一","要点二"],"caution":"请用户确认"}'
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    provider = OpenAICompatibleAssistProvider(
+        base_url="http://127.0.0.1:11434/v1",
+        model="qwen2.5:7b",
+        api_key="local-key",
+        client=client,
+    )
+
+    response = provider.assist(
+        AssistRequest(action="explain", segments=sample_segments(), window_seconds=60)
+    )
+
+    assert response.provider == "openai_compatible"
+    assert response.title == "LLM解释"
+    assert response.bullets == ["要点一", "要点二"]
+    assert seen["url"] == "http://127.0.0.1:11434/v1/chat/completions"
+    assert seen["auth"] == "Bearer local-key"
+    assert seen["model"] == "qwen2.5:7b"
+    assert seen["messages"][0]["role"] == "system"
+
+
+def test_provider_factory_creates_openai_compatible_provider_with_config():
+    provider = AssistProviderFactory.create(
+        "local-llm",
+        base_url="http://127.0.0.1:1234/v1",
+        model="local-model",
+    )
+
+    assert isinstance(provider, OpenAICompatibleAssistProvider)
+
+
+def test_litellm_provider_converts_json_response():
+    seen = {}
+
+    def fake_completion(**kwargs):
+        seen.update(kwargs)
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": (
+                            '{"title":"LiteLLM解释","summary":"统一供应商输出",'
+                            '"bullets":["统一接口","保留用户确认"],"caution":"仅供参考"}'
+                        )
+                    }
+                }
+            ]
+        }
+
+    provider = LiteLLMAssistProvider(
+        model="openai/gpt-4o-mini",
+        api_key="test-key",
+        base_url="http://proxy.example/v1",
+        completion_func=fake_completion,
+    )
+
+    response = provider.assist(
+        AssistRequest(action="question", segments=sample_segments(), window_seconds=60)
+    )
+
+    assert response.provider == "litellm"
+    assert response.title == "LiteLLM解释"
+    assert response.bullets == ["统一接口", "保留用户确认"]
+    assert seen["model"] == "openai/gpt-4o-mini"
+    assert seen["api_key"] == "test-key"
+    assert seen["api_base"] == "http://proxy.example/v1"
+    assert seen["response_format"] == {"type": "json_object"}
+    assert seen["messages"][0]["role"] == "system"
+
+
+def test_provider_factory_creates_litellm_provider_with_config():
+    provider = AssistProviderFactory.create(
+        "litellm",
+        base_url="http://proxy.example/v1",
+        model="anthropic/claude-3-5-sonnet",
+        api_key="test-key",
+    )
+
+    assert isinstance(provider, LiteLLMAssistProvider)
+
+
+def json_loads(content: bytes):
+    import json
+
+    return json.loads(content.decode("utf-8"))

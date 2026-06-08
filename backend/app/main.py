@@ -4,7 +4,7 @@ from fastapi import Depends, FastAPI, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import Settings, get_settings
-from .assistant import UnderstandingAssistant
+from .assistant import AssistProviderFactory, UnderstandingAssistant
 from .schemas import AssistRequest, AssistResponse, HealthResponse, TranscriptionResponse, VideoUrlRequest
 from .sources import SourceRegistry, create_default_registry
 from .transcriber import WhisperTranscriber
@@ -35,7 +35,15 @@ def get_source_registry() -> SourceRegistry:
 
 @lru_cache
 def get_understanding_assistant() -> UnderstandingAssistant:
-    return UnderstandingAssistant()
+    settings = get_settings()
+    provider = AssistProviderFactory.create(
+        settings.assist_provider,
+        base_url=settings.assist_base_url,
+        model=settings.assist_model,
+        api_key=settings.assist_api_key,
+        timeout_seconds=settings.assist_timeout_seconds,
+    )
+    return UnderstandingAssistant(provider)
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -46,6 +54,7 @@ def health(settings: Settings = Depends(get_settings)) -> HealthResponse:
         api_version=app.version,
         asr_engine="faster-whisper",
         device=settings.whisper_device,
+        assist_provider=settings.assist_provider,
         supported_video_sources=["YouTube", "Bilibili"],
         browser_cookie_sources=["edge", "chrome", "firefox"],
     )

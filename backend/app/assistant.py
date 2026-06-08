@@ -1,12 +1,27 @@
+import json
+from typing import Protocol
+
+import httpx
+
 from .schemas import AssistRequest, AssistResponse, TranscriptSegment
 
 
-class UnderstandingAssistant:
+class AssistProvider(Protocol):
+    name: str
+
+    def assist(self, request: AssistRequest) -> AssistResponse:
+        """Return an assistive response from a transcript context."""
+
+
+class RuleBasedAssistProvider:
+    name = "rule_based"
+
     def assist(self, request: AssistRequest) -> AssistResponse:
         segments = self._select_window(request.segments, request.window_seconds)
         if not segments:
             return AssistResponse(
                 action=request.action,
+                provider=self.name,
                 title="还没有可用上下文",
                 summary="请先完成一次音频或视频转写，再使用参与辅助。",
                 bullets=["上传或解析音频后，系统会基于最近的字幕片段生成辅助内容。"],
@@ -26,6 +41,7 @@ class UnderstandingAssistant:
 
         return AssistResponse(
             action=request.action,
+            provider=self.name,
             title="暂不支持的辅助类型",
             summary="当前版本还没有实现这个辅助动作。",
             bullets=[],
@@ -67,6 +83,7 @@ class UnderstandingAssistant:
     ) -> AssistResponse:
         return AssistResponse(
             action=request.action,
+            provider=self.name,
             title="刚刚发生了什么",
             summary=f"最近 {request.window_seconds} 秒主要围绕这段内容展开：{self._join_text(segments)}",
             bullets=self._speaker_lines(segments),
@@ -94,6 +111,7 @@ class UnderstandingAssistant:
 
         return AssistResponse(
             action=request.action,
+            provider=self.name,
             title="观点关系梳理",
             summary=summary,
             bullets=bullets,
@@ -108,6 +126,7 @@ class UnderstandingAssistant:
         context = self._join_text(segments, max_chars=120)
         return AssistResponse(
             action=request.action,
+            provider=self.name,
             title="可以这样追问",
             summary="下面是几种比较安全的课堂/会议追问方式，适合由你确认后再表达。",
             bullets=[
@@ -125,6 +144,7 @@ class UnderstandingAssistant:
     ) -> AssistResponse:
         return AssistResponse(
             action=request.action,
+            provider=self.name,
             title="缺席补偿摘要",
             summary=f"你离开期间可以先抓住这一条主线：{self._join_text(segments)}",
             bullets=[
@@ -153,8 +173,212 @@ class UnderstandingAssistant:
 
         return AssistResponse(
             action=request.action,
+            provider=self.name,
             title="会后行动项草稿",
             summary="系统从最近字幕中提取了可能需要跟进的内容。",
             bullets=bullets,
             caution="行动项需要用户确认后才能视为正式任务。",
         )
+
+
+class OpenAICompatibleAssistProvider:
+    name = "openai_compatible"
+
+    def __init__(
+        self,
+        base_url: str,
+        model: str,
+        api_key: str | None = None,
+        timeout_seconds: float = 60.0,
+        client: httpx.Client | None = None,
+    ):
+        if not base_url.strip():
+            raise ValueError("ASSIST_BASE_URL is required for the openai_compatible provider.")
+        if not model.strip():
+            raise ValueError("ASSIST_MODEL is required for the openai_compatible provider.")
+
+        self.base_url = base_url.rstrip("/")
+        self.model = model
+        self.api_key = api_key
+        self.timeout_seconds = timeout_seconds
+        self.client = client or httpx.Client(timeout=timeout_seconds)
+
+    def assist(self, request: AssistRequest) -> AssistResponse:
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        response = self.client.post(
+            f"{self.base_url}/chat/completions",
+            headers=headers,
+            json={
+                "model": self.model,
+                "temperature": 0.2,
+                "response_format": {"type": "json_object"},
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": self._system_prompt(),
+                    },
+                    {
+                        "role": "user",
+                        "content": self._user_prompt(request),
+                    },
+                ],
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+        content = payload["choices"][0]["message"]["content"]
+        return build_llm_assist_response(request, self.name, content)
+
+    @staticmethod
+    def _system_prompt() -> str:
+        return (
+            "你是课堂和会议中的实时理解无障碍助手。"
+            "你只帮助用户理解上下文和准备表达，不替用户发言，也不把讨论自动判定为冲突。"
+            "请仅返回 JSON 对象，字段为 title、summary、bullets、caution；bullets 必须是字符串数组。"
+        )
+
+    @staticmethod
+    def _user_prompt(request: AssistRequest) -> str:
+        lines = [
+            f"[{segment.start:.2f}-{segment.end:.2f}] {segment.speaker}: {segment.text}"
+            for segment in request.segments
+        ]
+        return (
+            f"辅助动作：{request.action}\n"
+            f"上下文窗口：最近 {request.window_seconds} 秒\n"
+            "字幕：\n"
+            + "\n".join(lines)
+        )
+
+
+class LiteLLMAssistProvider:
+    name = "litellm"
+
+    def __init__(
+        self,
+        model: str,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        timeout_seconds: float = 60.0,
+        completion_func=None,
+    ):
+        if not model.strip():
+            raise ValueError("ASSIST_MODEL is required for the litellm provider.")
+
+        self.model = model
+        self.api_key = api_key
+        self.base_url = base_url.rstrip("/") if base_url else None
+        self.timeout_seconds = timeout_seconds
+        self.completion_func = completion_func
+
+    def assist(self, request: AssistRequest) -> AssistResponse:
+        completion = self.completion_func or self._load_completion()
+        kwargs = {
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": OpenAICompatibleAssistProvider._system_prompt(),
+                },
+                {
+                    "role": "user",
+                    "content": OpenAICompatibleAssistProvider._user_prompt(request),
+                },
+            ],
+            "temperature": 0.2,
+            "response_format": {"type": "json_object"},
+            "timeout": self.timeout_seconds,
+        }
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+        if self.base_url:
+            kwargs["api_base"] = self.base_url
+
+        response = completion(**kwargs)
+        content = extract_chat_content(response)
+        return build_llm_assist_response(request, self.name, content)
+
+    @staticmethod
+    def _load_completion():
+        try:
+            from litellm import completion
+        except ImportError as exc:
+            raise RuntimeError(
+                "LiteLLM is not installed. Run `pip install -r backend/requirements.txt` "
+                "inside the whisperproject environment."
+            ) from exc
+        return completion
+
+
+def extract_chat_content(response) -> str:
+    if isinstance(response, dict):
+        return response["choices"][0]["message"]["content"]
+
+    choice = response.choices[0]
+    message = choice.message
+    return message["content"] if isinstance(message, dict) else message.content
+
+
+def build_llm_assist_response(
+    request: AssistRequest,
+    provider_name: str,
+    content: str,
+) -> AssistResponse:
+    result = json.loads(content)
+
+    return AssistResponse(
+        action=request.action,
+        provider=provider_name,
+        title=str(result["title"]),
+        summary=str(result["summary"]),
+        bullets=[str(item) for item in result.get("bullets", [])],
+        caution=str(
+            result.get(
+                "caution",
+                "这是 AI 生成的辅助草稿，是否采用仍由你决定。",
+            )
+        ),
+    )
+
+
+class AssistProviderFactory:
+    @staticmethod
+    def create(
+        provider_name: str,
+        *,
+        base_url: str | None = None,
+        model: str | None = None,
+        api_key: str | None = None,
+        timeout_seconds: float = 60.0,
+        client: httpx.Client | None = None,
+    ) -> AssistProvider:
+        normalized = provider_name.strip().lower().replace("-", "_")
+        if normalized in {"rule", "rules", "rule_based", "rulebased"}:
+            return RuleBasedAssistProvider()
+        if normalized in {"openai", "openai_compatible", "local_llm", "llm"}:
+            return OpenAICompatibleAssistProvider(
+                base_url=base_url or "",
+                model=model or "",
+                api_key=api_key,
+                timeout_seconds=timeout_seconds,
+                client=client,
+            )
+        if normalized in {"litellm", "lite_llm"}:
+            return LiteLLMAssistProvider(
+                base_url=base_url,
+                model=model or "",
+                api_key=api_key,
+                timeout_seconds=timeout_seconds,
+            )
+        raise ValueError(f"Unsupported assist provider: {provider_name}")
+
+
+class UnderstandingAssistant:
+    def __init__(self, provider: AssistProvider):
+        self.provider = provider
+
+    def assist(self, request: AssistRequest) -> AssistResponse:
+        return self.provider.assist(request)

@@ -236,7 +236,7 @@ function renderAssistance(result) {
 
   const caution = document.createElement("small");
   caution.className = "assist-result-caution";
-  caution.textContent = result.caution;
+  caution.textContent = `${result.caution} · Provider: ${result.provider || "unknown"}`;
 
   elements.noticeMessage.append(title, summary, list, caution);
 }

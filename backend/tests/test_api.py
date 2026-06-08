@@ -51,6 +51,7 @@ def test_health():
     assert response.json()["status"] == "ok"
     assert response.json()["api_version"] == "0.3.0"
     assert response.json()["asr_engine"] == "faster-whisper"
+    assert response.json()["assist_provider"] == "rule_based"
     assert "chrome" in response.json()["browser_cookie_sources"]
 
 
