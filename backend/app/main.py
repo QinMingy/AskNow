@@ -5,7 +5,15 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import Settings, get_settings
 from .assistant import AssistProviderFactory, UnderstandingAssistant
-from .schemas import AssistRequest, AssistResponse, HealthResponse, TranscriptionResponse, VideoUrlRequest
+from .provider_status import get_assist_provider_status
+from .schemas import (
+    AssistProviderStatus,
+    AssistRequest,
+    AssistResponse,
+    HealthResponse,
+    TranscriptionResponse,
+    VideoUrlRequest,
+)
 from .sources import SourceRegistry, create_default_registry
 from .transcriber import WhisperTranscriber
 
@@ -83,3 +91,10 @@ def assist(
     assistant: UnderstandingAssistant = Depends(get_understanding_assistant),
 ) -> AssistResponse:
     return assistant.assist(request)
+
+
+@app.get("/api/assist/provider", response_model=AssistProviderStatus)
+def assist_provider_status(
+    settings: Settings = Depends(get_settings),
+) -> AssistProviderStatus:
+    return get_assist_provider_status(settings)

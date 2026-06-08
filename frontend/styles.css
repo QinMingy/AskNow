@@ -625,6 +625,36 @@ h1 {
   background: #e8eee8;
 }
 
+.provider-status-card {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid rgba(36, 72, 63, 0.11);
+  border-radius: 13px;
+  background: rgba(232, 238, 232, 0.78);
+}
+
+.provider-status-card strong {
+  color: #34584d;
+  font-size: 11px;
+}
+
+.provider-status-card p {
+  margin: 8px 0 0;
+  color: #77857d;
+  font-size: 9px;
+  line-height: 1.7;
+}
+
+.provider-status-card.provider-ready {
+  border-color: rgba(93, 149, 124, 0.2);
+  background: rgba(226, 241, 233, 0.85);
+}
+
+.provider-status-card.provider-warning {
+  border-color: rgba(196, 107, 89, 0.22);
+  background: rgba(250, 233, 227, 0.72);
+}
+
 .privacy-heading {
   gap: 8px;
   color: #34584d;

@@ -44,6 +44,30 @@ $env:ASSIST_TIMEOUT_SECONDS="60"
 | `ASSIST_BASE_URL` | 可选，代理或自定义服务地址 |
 | `ASSIST_TIMEOUT_SECONDS` | 可选，请求超时，默认 60 秒 |
 
+## 配置诊断
+
+启动后端后，可以先检查 LiteLLM provider 是否配置完整：
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8010/api/assist/provider
+```
+
+返回示例：
+
+```json
+{
+  "provider": "litellm",
+  "ready": true,
+  "mode": "litellm",
+  "required": ["ASSIST_MODEL", "litellm package"],
+  "missing": [],
+  "details": ["Uses LiteLLM as a unified provider layer."],
+  "next_step": "LiteLLM configuration is complete. Test with a short /api/assist request."
+}
+```
+
+如果 `ready=false`，先根据 `missing` 字段补齐环境变量或依赖，再重新运行 `start_demo.bat`。
+
 ## 架构位置
 
 ```text

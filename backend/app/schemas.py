@@ -53,6 +53,16 @@ class AssistResponse(BaseModel):
     caution: str
 
 
+class AssistProviderStatus(BaseModel):
+    provider: str
+    ready: bool
+    mode: str
+    required: list[str]
+    missing: list[str]
+    details: list[str]
+    next_step: str
+
+
 class HealthResponse(BaseModel):
     status: str
     service: str

@@ -37,6 +37,7 @@ const elements = {
   focusTitle: document.querySelector("#focusTitle"),
   noticeMessage: document.querySelector("#noticeMessage"),
   pickFileButton: document.querySelector("#pickFileButton"),
+  providerStatus: document.querySelector("#providerStatus"),
   statusDot: document.querySelector("#statusDot"),
   statusText: document.querySelector("#statusText"),
   topicStatus: document.querySelector("#topicStatus"),
@@ -112,6 +113,25 @@ async function checkBackendCapabilities() {
     }
   } catch {
     // The normal upload flow will show a useful connection error when needed.
+  }
+}
+
+async function checkAssistProviderStatus() {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/assist/provider`, { cache: "no-store" });
+    if (!response.ok) return;
+
+    const status = await response.json();
+    const missing = Array.isArray(status.missing) ? status.missing : [];
+    elements.providerStatus.classList.toggle("provider-ready", Boolean(status.ready));
+    elements.providerStatus.classList.toggle("provider-warning", !status.ready);
+    elements.providerStatus.querySelector("strong").textContent = `辅助模型 · ${status.provider}`;
+    elements.providerStatus.querySelector("p").textContent = status.ready
+      ? `${status.mode} 已就绪。${status.next_step || ""}`
+      : `${status.mode} 未就绪：缺少 ${missing.join(", ") || "配置"}。${status.next_step || ""}`;
+  } catch {
+    elements.providerStatus.classList.add("provider-warning");
+    elements.providerStatus.querySelector("p").textContent = "暂时无法读取辅助模型配置状态。";
   }
 }
 
@@ -420,3 +440,4 @@ document.querySelectorAll(".action-button").forEach((button, index) => {
 
 renderDemo();
 checkBackendCapabilities();
+checkAssistProviderStatus();
