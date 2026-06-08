@@ -40,10 +40,10 @@ if not exist "%FRONTEND_DIR%\index.html" (
 )
 
 echo [1/2] Starting backend at http://127.0.0.1:8010
-start "Classroom Assistant Backend" cmd /k call "%BACKEND_RUNNER%"
+start "Classroom Assistant Backend" cmd /c call "%BACKEND_RUNNER%"
 
 echo [2/2] Starting frontend at http://127.0.0.1:5173
-start "Classroom Assistant Frontend" cmd /k call "%FRONTEND_RUNNER%"
+start "Classroom Assistant Frontend" cmd /c call "%FRONTEND_RUNNER%"
 
 echo.
 echo Demo is starting in two terminal windows.

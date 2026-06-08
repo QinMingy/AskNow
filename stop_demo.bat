@@ -1,5 +1,5 @@
 @echo off
-setlocal
+setlocal EnableDelayedExpansion
 
 echo [Classroom Assistant] Stopping demo services...
 
@@ -19,6 +19,7 @@ set "FOUND="
 for /f "tokens=5" %%P in ('netstat -ano ^| findstr /R /C:":%PORT% .*LISTENING"') do (
   set "FOUND=1"
   echo Stopping process %%P on port %PORT%...
+  for /f %%C in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "(Get-CimInstance Win32_Process -Filter 'ProcessId=%%P').ParentProcessId"') do set "PARENT_PID=%%C"
   powershell -NoProfile -ExecutionPolicy Bypass -Command "Stop-Process -Id %%P -Force -ErrorAction Stop" >nul 2>nul
   if errorlevel 1 (
     taskkill /F /T /PID %%P >nul 2>nul
@@ -27,6 +28,10 @@ for /f "tokens=5" %%P in ('netstat -ano ^| findstr /R /C:":%PORT% .*LISTENING"')
     echo   Could not stop PID %%P. It may already be closed or require administrator permission.
   ) else (
     echo   Stopped PID %%P.
+  )
+  if defined PARENT_PID (
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$p = Get-Process -Id !PARENT_PID! -ErrorAction SilentlyContinue; if ($p -and $p.ProcessName -eq 'cmd') { Stop-Process -Id !PARENT_PID! -Force }" >nul 2>nul
+    set "PARENT_PID="
   )
 )
 
