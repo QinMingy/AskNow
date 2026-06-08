@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>课堂理解无障碍助手</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark">共</span>
+          <div>
+            <p class="eyebrow">COMPREHENSION ACCESSIBILITY</p>
+            <h1>课堂理解共在助手</h1>
+          </div>
+        </div>
+        <div class="session-status">
+          <span id="statusDot" class="status-dot status-idle"></span>
+          <span id="statusText">等待音频</span>
+          <span class="privacy-pill">仅本地处理</span>
+        </div>
+      </header>
+
+      <section class="hero">
+        <div>
+          <p class="eyebrow">PHASE 01 · RECORDED AUDIO DEMO</p>
+          <h2>跟上正在发生的讨论，<br />而不只是事后回顾。</h2>
+        </div>
+        <p class="hero-copy">
+          上传一段课堂或会议录音。系统会在本地 GPU 上完成转写，并为之后的实时解释、追问和缺席补偿建立清晰入口。
+        </p>
+      </section>
+
+      <section class="workspace-grid">
+        <article class="panel transcript-panel">
+          <div class="panel-heading">
+            <div>
+              <span class="panel-index">01</span>
+              <h3>转写现场</h3>
+            </div>
+            <span id="durationLabel" class="quiet-label">等待输入</span>
+          </div>
+
+          <div class="input-tabs" aria-label="输入方式">
+            <button id="fileModeButton" class="input-tab active" type="button">本地音频</button>
+            <button id="urlModeButton" class="input-tab" type="button">视频链接</button>
+          </div>
+
+          <div id="uploadZone" class="upload-zone">
+            <input id="audioInput" type="file" accept=".mp3,.wav,.m4a,.mp4" hidden />
+            <button id="pickFileButton" class="upload-icon" type="button" aria-label="选择音频">↑</button>
+            <div>
+              <strong id="fileName">拖放录音，或选择本地文件</strong>
+              <p id="fileMeta">支持 MP3、WAV、M4A、MP4</p>
+            </div>
+            <button id="transcribeButton" class="primary-button" type="button">选择音频</button>
+          </div>
+
+          <div id="urlZone" class="url-zone" hidden>
+            <label for="videoUrlInput">粘贴 B 站或 YouTube 链接</label>
+            <div class="url-input-row">
+              <input id="videoUrlInput" type="url" placeholder="https://www.bilibili.com/video/... 或 https://youtu.be/..." />
+              <button id="urlTranscribeButton" class="primary-button" type="button">解析并转写</button>
+            </div>
+            <label class="browser-cookie-row" for="browserCookieSelect">
+              <span>登录态</span>
+              <select id="browserCookieSelect">
+                <option value="">匿名下载</option>
+                <option value="edge">读取 Edge 登录态</option>
+                <option value="chrome">读取 Chrome 登录态</option>
+                <option value="firefox">读取 Firefox 登录态（推荐）</option>
+              </select>
+            </label>
+            <p>如果 B 站返回 412，先选择已登录 B 站的浏览器再重试。Firefox 在 Windows 下通常更稳定。</p>
+          </div>
+
+          <div id="errorMessage" class="message error-message" hidden></div>
+
+          <div id="transcriptList" class="transcript-list" aria-live="polite"></div>
+        </article>
+
+        <article class="panel focus-panel">
+          <div class="panel-heading">
+            <div>
+              <span class="panel-index">02</span>
+              <h3>理解导航</h3>
+            </div>
+            <span class="quiet-label">基础规则摘要</span>
+          </div>
+
+          <div class="focus-card">
+            <p class="card-kicker">当前讨论焦点</p>
+            <h4 id="focusTitle">准备进入讨论</h4>
+            <p id="focusSummary">等待上传录音。转写完成后，这里会从开头几段内容中提取一条基础主题提示。</p>
+            <div class="focus-meter">
+              <span></span>
+              <span></span>
+              <span></span>
+              <span id="focusMeterLast"></span>
+            </div>
+          </div>
+
+          <div class="insight-stack">
+            <div class="insight-row">
+              <span>主题状态</span>
+              <strong id="topicStatus">等待开始</strong>
+            </div>
+            <div class="insight-row">
+              <span>说话人</span>
+              <strong>Speaker A / B · 模拟</strong>
+            </div>
+            <div class="insight-row">
+              <span>下一阶段</span>
+              <strong>实时主题与争论追踪</strong>
+            </div>
+          </div>
+
+          <div class="principle-card">
+            <span>设计原则</span>
+            <p>AI 帮你重新获得参与能力，但不会替你表达。</p>
+          </div>
+        </article>
+
+        <aside class="panel assistance-panel">
+          <div class="panel-heading">
+            <div>
+              <span class="panel-index">03</span>
+              <h3>参与辅助</h3>
+            </div>
+          </div>
+
+          <p class="aside-intro">需要时再请求帮助。所有建议都会先交给你确认。</p>
+
+          <div class="action-list">
+            <button class="action-button" type="button" data-action="我没听懂">
+              <span class="action-icon">?</span>
+              <span><strong>我没听懂</strong><small>解释最近一分钟</small></span>
+              <span class="action-arrow">→</span>
+            </button>
+            <button class="action-button" type="button" data-action="刚刚谁反对谁？">
+              <span class="action-icon">↔</span>
+              <span><strong>刚刚谁反对谁？</strong><small>梳理观点关系</small></span>
+              <span class="action-arrow">→</span>
+            </button>
+            <button class="action-button" type="button" data-action="帮我生成一个问题">
+              <span class="action-icon">+</span>
+              <span><strong>帮我生成一个问题</strong><small>给出合适追问</small></span>
+              <span class="action-arrow">→</span>
+            </button>
+            <button class="action-button" type="button" data-action="我离开了 3 分钟">
+              <span class="action-icon">↩</span>
+              <span><strong>我离开了 3 分钟</strong><small>快速补上内容</small></span>
+              <span class="action-arrow">→</span>
+            </button>
+            <button class="action-button" type="button" data-action="生成会后行动项">
+              <span class="action-icon">✓</span>
+              <span><strong>生成会后行动项</strong><small>整理下一步任务</small></span>
+              <span class="action-arrow">→</span>
+            </button>
+          </div>
+
+          <div id="noticeMessage" class="message notice-message" hidden></div>
+
+          <div class="privacy-card">
+            <div class="privacy-heading">
+              <span class="privacy-symbol">◎</span>
+              <strong>隐私状态</strong>
+            </div>
+            <p>音频临时处理，转写结束后不在项目目录中永久保存。</p>
+          </div>
+        </aside>
+      </section>
+    </main>
+    <script src="./app.js?v=20260608-5"></script>
+  </body>
+</html>
