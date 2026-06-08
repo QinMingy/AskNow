@@ -2,6 +2,13 @@ const API_BASE_URL = "http://127.0.0.1:8010";
 const REQUIRED_API_VERSION = "0.3.0";
 const acceptedExtensions = [".mp3", ".wav", ".m4a", ".mp4"];
 const assistActions = ["explain", "conflict", "question", "catchup", "actions"];
+const assistActionLabels = {
+  explain: "解释刚刚发生了什么",
+  conflict: "梳理观点关系",
+  question: "生成可确认的追问",
+  catchup: "补上缺席内容",
+  actions: "整理会后行动项",
+};
 
 const demoSegments = [
   {
@@ -268,7 +275,7 @@ async function handleAssistance(action, button) {
   }
 
   showError("");
-  showNotice("正在整理最近的讨论上下文...");
+  showNotice(`正在${assistActionLabels[action] || "整理最近的讨论上下文"}...`);
   button.disabled = true;
 
   try {

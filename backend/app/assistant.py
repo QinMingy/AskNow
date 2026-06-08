@@ -237,7 +237,9 @@ class OpenAICompatibleAssistProvider:
         return (
             "你是课堂和会议中的实时理解无障碍助手。"
             "你只帮助用户理解上下文和准备表达，不替用户发言，也不把讨论自动判定为冲突。"
+            "你必须严格根据用户给出的 action 类型生成不同风格的结果，不能对所有 action 使用同一种总结模板。"
             "请仅返回 JSON 对象，字段为 title、summary、bullets、caution；bullets 必须是字符串数组。"
+            "title 必须明确体现当前 action 的任务类型。"
         )
 
     @staticmethod
@@ -248,7 +250,12 @@ class OpenAICompatibleAssistProvider:
         ]
         return (
             f"辅助动作：{request.action}\n"
+            f"动作说明：{action_instruction(request.action)}\n"
             f"上下文窗口：最近 {request.window_seconds} 秒\n"
+            "输出要求：\n"
+            "- 不要重复字幕原文作为唯一结果。\n"
+            "- 不要替用户发言，只给用户可确认的理解或表达草稿。\n"
+            "- bullets 应该服务于当前 action，而不是泛泛总结。\n"
             "字幕：\n"
             + "\n".join(lines)
         )
@@ -342,6 +349,32 @@ def build_llm_assist_response(
             )
         ),
     )
+
+
+def action_instruction(action: str) -> str:
+    instructions = {
+        "explain": (
+            "解释最近讨论发生了什么。summary 用通俗语言讲清主线；"
+            "bullets 列出 3-5 个关键点，帮助听漏的人补上理解。"
+        ),
+        "conflict": (
+            "梳理观点关系。不要武断判断冲突；如果没有明确反对关系，要说明只能看到发言差异。"
+            "bullets 按说话人或观点列出可能的支持、疑问、分歧点。"
+        ),
+        "question": (
+            "生成用户可以亲自提出的追问。summary 简短说明提问策略；"
+            "bullets 必须是 2-3 个完整问题，语气自然、克制、适合课堂或会议。"
+        ),
+        "catchup": (
+            "生成缺席补偿摘要。summary 先给一句主线；"
+            "bullets 包含时间范围、关键变化、现在应该先关注什么。"
+        ),
+        "actions": (
+            "提取会后行动项草稿。summary 说明是否发现明确任务；"
+            "bullets 尽量写成待办项，包含任务、负责人、截止时间；缺失信息要标注待确认。"
+        ),
+    }
+    return instructions.get(action, "根据字幕上下文生成辅助理解内容。")
 
 
 class AssistProviderFactory:

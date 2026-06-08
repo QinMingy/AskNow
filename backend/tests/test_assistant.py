@@ -9,6 +9,7 @@ from app.assistant import (
     OpenAICompatibleAssistProvider,
     RuleBasedAssistProvider,
     UnderstandingAssistant,
+    action_instruction,
 )
 from app.main import app, get_understanding_assistant
 from app.schemas import AssistRequest, TranscriptSegment
@@ -216,6 +217,8 @@ def test_litellm_provider_converts_json_response():
     assert seen["api_base"] == "http://proxy.example/v1"
     assert seen["response_format"] == {"type": "json_object"}
     assert seen["messages"][0]["role"] == "system"
+    assert "辅助动作：question" in seen["messages"][1]["content"]
+    assert "完整问题" in seen["messages"][1]["content"]
 
 
 def test_provider_factory_creates_litellm_provider_with_config():
@@ -227,6 +230,13 @@ def test_provider_factory_creates_litellm_provider_with_config():
     )
 
     assert isinstance(provider, LiteLLMAssistProvider)
+
+
+def test_action_instructions_are_distinct():
+    assert "完整问题" in action_instruction("question")
+    assert "行动项" in action_instruction("actions")
+    assert "观点关系" in action_instruction("conflict")
+    assert action_instruction("question") != action_instruction("actions")
 
 
 def json_loads(content: bytes):
