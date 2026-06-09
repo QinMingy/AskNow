@@ -1,6 +1,9 @@
 import logging
+import subprocess
+import sys
 import time
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from fastapi import HTTPException, status
 
@@ -18,11 +21,13 @@ class PyannoteDiarizer:
         token: str | None,
         device: str = "cuda",
         pipeline=None,
+        audio_loader=None,
     ):
         self.model = model
         self.token = token
         self.device = device
         self._pipeline = pipeline
+        self._audio_loader = audio_loader
 
     def _load_pipeline(self):
         if self._pipeline is not None:
@@ -78,6 +83,64 @@ class PyannoteDiarizer:
         )
         return self._pipeline
 
+    def _load_audio(self, audio_path: Path) -> dict:
+        if self._audio_loader is not None:
+            return self._audio_loader(audio_path)
+
+        try:
+            import torchaudio
+
+            with TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+                normalized_path = Path(tmpdir) / "diarization-input.wav"
+                command = [
+                    str(self._ffmpeg_executable()),
+                    "-nostdin",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-y",
+                    "-i",
+                    str(audio_path),
+                    "-ac",
+                    "1",
+                    "-ar",
+                    "16000",
+                    "-c:a",
+                    "pcm_s16le",
+                    str(normalized_path),
+                ]
+                started = time.perf_counter()
+                logger.info(
+                    "pyannote.audio_decode.start extension=%s",
+                    audio_path.suffix.lower(),
+                )
+                subprocess.run(
+                    command,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                waveform, sample_rate = torchaudio.load(str(normalized_path))
+                logger.info(
+                    "pyannote.audio_decode.complete sample_rate=%s channels=%s samples=%s elapsed_ms=%.1f",
+                    sample_rate,
+                    waveform.shape[0],
+                    waveform.shape[-1],
+                    (time.perf_counter() - started) * 1000,
+                )
+                return {"waveform": waveform, "sample_rate": sample_rate}
+        except Exception as exc:
+            logger.exception("pyannote.audio_decode.failed")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Unable to prepare audio for speaker diarization: {exc}",
+            ) from exc
+
+    @staticmethod
+    def _ffmpeg_executable() -> Path | str:
+        conda_ffmpeg = Path(sys.executable).parent / "Library" / "bin" / "ffmpeg.exe"
+        return conda_ffmpeg if conda_ffmpeg.exists() else "ffmpeg"
+
     def assign_speakers(
         self,
         audio_path: Path,
@@ -93,7 +156,8 @@ class PyannoteDiarizer:
             len(segments),
         )
         try:
-            output = self._load_pipeline()(str(audio_path))
+            audio = self._load_audio(audio_path)
+            output = self._load_pipeline()(audio)
             diarization = getattr(output, "speaker_diarization", output)
             turns = [
                 (float(turn.start), float(turn.end), str(speaker))

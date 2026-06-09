@@ -99,7 +99,7 @@ class WhisperTranscriber:
         source_registry: SourceRegistry,
         browser: str | None = None,
     ) -> TranscriptionResponse:
-        with TemporaryDirectory() as tmpdir:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             logger.info("video.resolve.start browser=%s", browser or "anonymous")
             media = source_registry.resolve(url, Path(tmpdir), browser=browser)
             logger.info(

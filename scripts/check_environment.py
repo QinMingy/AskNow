@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 
 def check_python_package(package: str) -> str:
@@ -58,6 +59,11 @@ def check_torch_cuda() -> str:
         return f"error: {exc}"
 
 
+def find_ffmpeg() -> str:
+    conda_ffmpeg = Path(sys.executable).parent / "Library" / "bin" / "ffmpeg.exe"
+    return str(conda_ffmpeg) if conda_ffmpeg.exists() else "ffmpeg"
+
+
 def main() -> int:
     checks = {
         "python": sys.version.split()[0],
@@ -79,7 +85,7 @@ def main() -> int:
         "nvidia-smi": run_version(
             ["nvidia-smi", "--query-gpu=name,driver_version", "--format=csv,noheader"]
         ),
-        "ffmpeg": run_version(["ffmpeg", "-version"]),
+        "ffmpeg": run_version([find_ffmpeg(), "-version"]),
         "torch CUDA": check_torch_cuda(),
         "cublas64_12.dll": check_dll("cublas64_12.dll"),
         "cudnn64_9.dll": check_dll("cudnn64_9.dll"),

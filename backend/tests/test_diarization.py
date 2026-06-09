@@ -59,12 +59,17 @@ def test_pyannote_assigns_stable_display_names():
             yield Turn(4.0, 6.0), None, "SPEAKER_03"
 
     class Pipeline:
-        def __call__(self, audio_path):
-            assert audio_path.endswith("sample.wav")
+        def __call__(self, audio):
+            assert audio == {"prepared": True}
             return Annotation()
 
     segments = [segment(1, 0, 2), segment(2, 2, 4), segment(3, 4, 6)]
-    diarizer = PyannoteDiarizer("model", token=None, pipeline=Pipeline())
+    diarizer = PyannoteDiarizer(
+        "model",
+        token=None,
+        pipeline=Pipeline(),
+        audio_loader=lambda path: {"prepared": True},
+    )
 
     result = diarizer.assign_speakers(Path("sample.wav"), segments)
 
@@ -93,7 +98,12 @@ def test_pyannote_supports_new_output_wrapper():
             return Output()
 
     segments = [segment(1, 0, 2)]
-    diarizer = PyannoteDiarizer("model", token=None, pipeline=Pipeline())
+    diarizer = PyannoteDiarizer(
+        "model",
+        token=None,
+        pipeline=Pipeline(),
+        audio_loader=lambda path: {"prepared": True},
+    )
 
     assert diarizer.assign_speakers(Path("sample.wav"), segments)[0].speaker == "Speaker A"
 

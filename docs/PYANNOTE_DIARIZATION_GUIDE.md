@@ -50,6 +50,11 @@ If the environment was upgraded from pyannote.audio 3.x, remove the obsolete
   -m pip uninstall -y speechbrain
 ```
 
+Before diarization, the backend decodes uploaded or downloaded media into an
+in-memory `16kHz` mono waveform. This avoids TorchCodec random-access sample
+count errors on compressed M4A/MP3 files and prevents Windows temporary files
+from remaining locked after inference.
+
 ## Configuration
 
 Real speaker diarization is the default:
