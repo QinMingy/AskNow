@@ -77,6 +77,22 @@ def test_actions_extracts_possible_followups():
     assert any("安排" in bullet for bullet in response.bullets)
 
 
+def test_custom_question_is_preserved_in_rule_based_response():
+    assistant = UnderstandingAssistant(RuleBasedAssistProvider())
+
+    response = assistant.assist(
+        AssistRequest(
+            action="custom",
+            custom_prompt="这个方案的前提是什么？",
+            segments=sample_segments(),
+        )
+    )
+
+    assert response.action == "custom"
+    assert "这个方案的前提是什么" in response.summary
+    assert any("最近讨论上下文" in bullet for bullet in response.bullets)
+
+
 def test_assist_api_returns_structured_result():
     app.dependency_overrides[get_understanding_assistant] = lambda: UnderstandingAssistant(
         RuleBasedAssistProvider()
@@ -219,6 +235,39 @@ def test_litellm_provider_converts_json_response():
     assert seen["messages"][0]["role"] == "system"
     assert "辅助动作：question" in seen["messages"][1]["content"]
     assert "完整问题" in seen["messages"][1]["content"]
+
+
+def test_litellm_custom_question_is_added_to_prompt():
+    seen = {}
+
+    def fake_completion(**kwargs):
+        seen.update(kwargs)
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": (
+                            '{"title":"自定义回答","summary":"基于字幕回答",'
+                            '"bullets":["上下文依据"],"caution":"请确认"}'
+                        )
+                    }
+                }
+            ]
+        }
+
+    provider = LiteLLMAssistProvider(model="test-model", completion_func=fake_completion)
+    provider.assist(
+        AssistRequest(
+            action="custom",
+            custom_prompt="这个结论有哪些前提？",
+            segments=sample_segments(),
+        )
+    )
+
+    prompt = seen["messages"][1]["content"]
+    assert "辅助动作：custom" in prompt
+    assert "这个结论有哪些前提？" in prompt
+    assert "直接回答用户自定义问题" in prompt
 
 
 def test_provider_factory_creates_litellm_provider_with_config():

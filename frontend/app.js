@@ -1,13 +1,24 @@
 const API_BASE_URL = "http://127.0.0.1:8010";
 const REQUIRED_API_VERSION = "0.4.0";
 const acceptedExtensions = [".mp3", ".wav", ".m4a", ".mp4"];
-const assistActions = ["explain", "conflict", "question", "catchup", "actions"];
 const assistActionLabels = {
   explain: "解释刚刚发生了什么",
   conflict: "梳理观点关系",
   question: "生成可确认的追问",
   catchup: "补上缺席内容",
   actions: "整理会后行动项",
+  custom: "回答你的问题",
+};
+const taskStageLabels = {
+  queued: "任务排队中",
+  uploading: "正在上传音频",
+  downloading: "正在获取视频音频",
+  waiting_for_gpu: "等待 GPU 处理",
+  transcribing: "正在生成字幕",
+  diarizing: "正在识别说话人",
+  completed: "处理完成",
+  failed: "处理失败",
+  cancelled: "任务已取消",
 };
 
 const demoSegments = [
@@ -36,6 +47,9 @@ const elements = {
   audioInput: document.querySelector("#audioInput"),
   browserCookieSelect: document.querySelector("#browserCookieSelect"),
   cancelTaskButton: document.querySelector("#cancelTaskButton"),
+  customQuestionButton: document.querySelector("#customQuestionButton"),
+  customQuestionForm: document.querySelector("#customQuestionForm"),
+  customQuestionInput: document.querySelector("#customQuestionInput"),
   durationLabel: document.querySelector("#durationLabel"),
   errorMessage: document.querySelector("#errorMessage"),
   fileModeButton: document.querySelector("#fileModeButton"),
@@ -49,9 +63,10 @@ const elements = {
   providerStatus: document.querySelector("#providerStatus"),
   progressBar: document.querySelector("#progressBar"),
   progressLabel: document.querySelector("#progressLabel"),
+  progressPercent: document.querySelector("#progressPercent"),
   statusDot: document.querySelector("#statusDot"),
   statusText: document.querySelector("#statusText"),
-  topicStatus: document.querySelector("#topicStatus"),
+  taskProgress: document.querySelector("#taskProgress"),
   transcribeButton: document.querySelector("#transcribeButton"),
   transcriptList: document.querySelector("#transcriptList"),
   uploadZone: document.querySelector("#uploadZone"),
@@ -98,9 +113,35 @@ function setState(state) {
 function updateTaskProgress(task) {
   const progress = Math.max(0, Math.min(100, Number(task.progress) || 0));
   elements.progressBar.style.width = `${progress}%`;
-  elements.progressLabel.textContent = `${task.message || task.stage} · ${progress}%`;
+  elements.progressLabel.textContent = taskStageLabels[task.stage] || task.message || task.stage;
+  elements.progressPercent.textContent = `${progress}%`;
+  elements.taskProgress.dataset.stage = task.stage;
+  elements.taskProgress.classList.toggle("is-active", !["completed", "failed", "cancelled"].includes(task.stage));
   elements.cancelTaskButton.hidden = ["completed", "failed", "cancelled"].includes(task.stage);
   setState(["queued", "uploading", "downloading", "waiting_for_gpu"].includes(task.stage) ? "uploading" : "transcribing");
+}
+
+function resetTaskProgress() {
+  elements.progressBar.style.width = "0%";
+  elements.progressLabel.textContent = "等待创建任务";
+  elements.progressPercent.textContent = "0%";
+  elements.taskProgress.dataset.stage = "idle";
+  elements.taskProgress.classList.remove("is-active");
+  elements.cancelTaskButton.hidden = true;
+}
+
+function markTaskFailure() {
+  elements.taskProgress.dataset.stage = "failed";
+  elements.taskProgress.classList.remove("is-active");
+  elements.progressLabel.textContent = "任务未完成";
+  elements.cancelTaskButton.hidden = true;
+}
+
+function beginTaskProgress() {
+  resetTaskProgress();
+  elements.progressLabel.textContent = "正在创建任务…";
+  elements.taskProgress.dataset.stage = "queued";
+  elements.taskProgress.classList.add("is-active");
 }
 
 async function waitForTask(taskId) {
@@ -148,6 +189,7 @@ async function cancelCurrentTask() {
 function showError(message) {
   elements.errorMessage.hidden = !message;
   elements.errorMessage.textContent = message || "";
+  elements.errorMessage.classList.toggle("is-visible", Boolean(message));
 }
 
 function showNotice(message) {
@@ -214,9 +256,7 @@ function selectFile(file) {
   showError("");
   showNotice("");
   setState("idle");
-  elements.progressBar.style.width = "0%";
-  elements.progressLabel.textContent = "等待创建任务";
-  elements.cancelTaskButton.hidden = true;
+  resetTaskProgress();
 
   elements.fileName.textContent = file.name;
   elements.fileMeta.textContent = `${(file.size / 1024 / 1024).toFixed(1)} MB · 已准备转写`;
@@ -273,7 +313,7 @@ async function transcribeVideoUrl(url) {
   return waitForTask(task.task_id);
 }
 
-async function requestAssistance(action) {
+async function requestAssistance(action, customPrompt = null) {
   const response = await fetch(`${API_BASE_URL}/api/assist`, {
     method: "POST",
     headers: {
@@ -283,6 +323,7 @@ async function requestAssistance(action) {
       action,
       window_seconds: action === "catchup" ? 180 : 60,
       segments: latestResult?.segments || [],
+      custom_prompt: customPrompt,
     }),
   });
 
@@ -327,7 +368,7 @@ function renderAssistance(result) {
   elements.noticeMessage.append(title, summary, list, caution);
 }
 
-async function handleAssistance(action, button) {
+async function handleAssistance(action, button, customPrompt = null) {
   if (!latestResult?.segments?.length) {
     showNotice("请先完成一次音频或视频转写，再使用理解辅助。");
     return;
@@ -338,7 +379,7 @@ async function handleAssistance(action, button) {
   button.disabled = true;
 
   try {
-    const result = await requestAssistance(action);
+    const result = await requestAssistance(action, customPrompt);
     renderAssistance(result);
   } catch (error) {
     showNotice("");
@@ -346,6 +387,17 @@ async function handleAssistance(action, button) {
   } finally {
     button.disabled = false;
   }
+}
+
+async function handleCustomQuestion(event) {
+  event.preventDefault();
+  const prompt = elements.customQuestionInput.value.trim();
+  if (!prompt) {
+    showError("请先输入你想结合当前字幕了解的问题。");
+    elements.customQuestionInput.focus();
+    return;
+  }
+  await handleAssistance("custom", elements.customQuestionButton, prompt);
 }
 
 async function handleTranscribe() {
@@ -357,7 +409,7 @@ async function handleTranscribe() {
   showError("");
   showNotice("");
   setState("uploading");
-  elements.progressLabel.textContent = "正在创建任务…";
+  beginTaskProgress();
 
   try {
     window.setTimeout(() => setState("transcribing"), 300);
@@ -366,6 +418,7 @@ async function handleTranscribe() {
     setState("complete");
   } catch (error) {
     showError(error instanceof Error ? error.message : "转写失败，请稍后再试。");
+    markTaskFailure();
     setState("error");
   }
 }
@@ -381,7 +434,7 @@ async function handleUrlTranscribe() {
   showError("");
   showNotice("");
   setState("uploading");
-  elements.progressLabel.textContent = "正在创建任务…";
+  beginTaskProgress();
 
   try {
     window.setTimeout(() => setState("transcribing"), 300);
@@ -390,6 +443,7 @@ async function handleUrlTranscribe() {
     setState("complete");
   } catch (error) {
     showError(error instanceof Error ? error.message : "链接转写失败，请稍后再试。");
+    markTaskFailure();
     setState("error");
   }
 }
@@ -410,9 +464,7 @@ function setInputMode(nextMode) {
   showError("");
   showNotice("");
   setState("idle");
-  elements.progressBar.style.width = "0%";
-  elements.progressLabel.textContent = "等待创建任务";
-  elements.cancelTaskButton.hidden = true;
+  resetTaskProgress();
 }
 
 function renderTranscript(segments, isDemo) {
@@ -452,7 +504,6 @@ function renderDemo() {
   renderTranscript(demoSegments, true);
   elements.focusTitle.textContent = "准备进入讨论";
   elements.focusSummary.textContent = "等待上传录音。转写完成后，这里会从开头几段内容中提取一条基础主题提示。";
-  elements.topicStatus.textContent = "等待开始";
   elements.focusMeterLast.classList.remove("active");
 }
 
@@ -469,7 +520,6 @@ function renderResult(result) {
   elements.durationLabel.textContent = `${formatTimestamp(result.duration)} · ${result.language || "zh"}${sourceLabel}`;
   elements.focusTitle.textContent = result.source?.title || "从录音开头提取的主题线索";
   elements.focusSummary.textContent = summary.length > 150 ? `${summary.slice(0, 150)}…` : summary || "未识别到可摘要的文本。";
-  elements.topicStatus.textContent = "已捕获初始上下文";
   elements.focusMeterLast.classList.add("active");
 }
 
@@ -477,6 +527,7 @@ elements.pickFileButton.addEventListener("click", () => elements.audioInput.clic
 elements.transcribeButton.addEventListener("click", handleTranscribe);
 elements.urlTranscribeButton.addEventListener("click", handleUrlTranscribe);
 elements.cancelTaskButton.addEventListener("click", cancelCurrentTask);
+elements.customQuestionForm.addEventListener("submit", handleCustomQuestion);
 elements.fileModeButton.addEventListener("click", () => setInputMode("file"));
 elements.urlModeButton.addEventListener("click", () => setInputMode("url"));
 elements.audioInput.addEventListener("change", (event) => {
@@ -506,9 +557,8 @@ elements.uploadZone.addEventListener("drop", (event) => {
   if (file) selectFile(file);
 });
 
-document.querySelectorAll(".action-button").forEach((button, index) => {
-  const action = assistActions[index];
-  button.dataset.action = action;
+document.querySelectorAll(".action-button").forEach((button) => {
+  const action = button.dataset.action;
   button.addEventListener("click", () => {
     handleAssistance(action, button);
   });

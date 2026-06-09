@@ -42,6 +42,8 @@ class RuleBasedAssistProvider:
             return self._catchup(request, segments)
         if request.action == "actions":
             return self._actions(request, segments)
+        if request.action == "custom":
+            return self._custom(request, segments)
 
         return AssistResponse(
             action=request.action,
@@ -184,6 +186,24 @@ class RuleBasedAssistProvider:
             caution="行动项需要用户确认后才能视为正式任务。",
         )
 
+    def _custom(
+        self,
+        request: AssistRequest,
+        segments: list[TranscriptSegment],
+    ) -> AssistResponse:
+        prompt = (request.custom_prompt or "").strip()
+        return AssistResponse(
+            action=request.action,
+            provider=self.name,
+            title="自定义问题参考",
+            summary=f"你想了解的是：{prompt or '未提供具体问题'}",
+            bullets=[
+                f"最近讨论上下文：{self._join_text(segments)}",
+                "规则模式只能提供上下文摘录；使用 LiteLLM 时会针对你的问题生成回答。",
+            ],
+            caution="请结合原始字幕确认答案，避免遗漏上下文。",
+        )
+
 
 class OpenAICompatibleAssistProvider:
     name = "openai_compatible"
@@ -274,6 +294,7 @@ class OpenAICompatibleAssistProvider:
         return (
             f"辅助动作：{request.action}\n"
             f"动作说明：{action_instruction(request.action)}\n"
+            f"用户自定义问题：{request.custom_prompt or '无'}\n"
             f"上下文窗口：最近 {request.window_seconds} 秒\n"
             "输出要求：\n"
             "- 不要重复字幕原文作为唯一结果。\n"
@@ -414,6 +435,10 @@ def action_instruction(action: str) -> str:
         "actions": (
             "提取会后行动项草稿。summary 说明是否发现明确任务；"
             "bullets 尽量写成待办项，包含任务、负责人、截止时间；缺失信息要标注待确认。"
+        ),
+        "custom": (
+            "直接回答用户自定义问题。必须基于字幕上下文，无法确定时明确说明；"
+            "summary 给出简洁答案，bullets 列出支撑答案的上下文依据。"
         ),
     }
     return instructions.get(action, "根据字幕上下文生成辅助理解内容。")

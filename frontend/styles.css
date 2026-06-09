@@ -21,6 +21,7 @@ body {
   background:
     radial-gradient(circle at 75% 10%, rgba(240, 137, 102, 0.14), transparent 28rem),
     linear-gradient(145deg, #f0f1ec 0%, #e4e8df 100%);
+  background-attachment: fixed;
 }
 
 button {
@@ -165,6 +166,15 @@ h1 {
   background: rgba(247, 248, 243, 0.76);
   box-shadow: 0 18px 45px rgba(39, 60, 52, 0.07);
   backdrop-filter: blur(18px);
+  animation: panel-enter 520ms ease both;
+}
+
+.panel:nth-child(2) {
+  animation-delay: 70ms;
+}
+
+.panel:nth-child(3) {
+  animation-delay: 140ms;
 }
 
 .panel-heading {
@@ -203,14 +213,62 @@ h1 {
 }
 
 .task-progress {
-  margin-bottom: 12px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid rgba(36, 72, 63, 0.1);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.36);
+  transition: border-color 220ms ease, background 220ms ease, box-shadow 220ms ease;
+}
+
+.task-progress.is-active {
+  border-color: rgba(93, 149, 124, 0.25);
+  background: rgba(241, 247, 242, 0.82);
+  box-shadow: 0 8px 22px rgba(36, 72, 63, 0.07);
+}
+
+.task-progress-heading,
+.task-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.task-progress-heading {
+  align-items: center;
+  margin-bottom: 8px;
+  color: #4d655c;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.task-progress-kicker {
+  color: #8b9891;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .task-progress-track {
-  height: 5px;
+  position: relative;
+  height: 7px;
   overflow: hidden;
   border-radius: 999px;
   background: rgba(36, 72, 63, 0.1);
+}
+
+.task-progress-track::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.7), transparent);
+  content: "";
+  opacity: 0;
+  transform: translateX(-100%);
+}
+
+.task-progress.is-active .task-progress-track::after {
+  opacity: 1;
+  animation: progress-shimmer 1.8s ease-in-out infinite;
 }
 
 .task-progress-track span {
@@ -219,13 +277,28 @@ h1 {
   height: 100%;
   border-radius: inherit;
   background: linear-gradient(90deg, #b16a4e, #5d957c);
-  transition: width 260ms ease;
+  box-shadow: 0 0 12px rgba(93, 149, 124, 0.2);
+  transition: width 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.task-progress[data-stage="completed"] .task-progress-track span {
+  background: #5d957c;
+}
+
+.task-progress[data-stage="failed"] {
+  border-color: rgba(196, 107, 89, 0.2);
+  background: rgba(250, 233, 227, 0.48);
+}
+
+.task-progress[data-stage="failed"] .task-progress-track span {
+  background: #c46b59;
+}
+
+.task-progress[data-stage="cancelled"] .task-progress-track span {
+  background: #a9ada8;
 }
 
 .task-progress-meta {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
   margin-top: 6px;
   color: #7b8881;
   font-size: 9px;
@@ -239,6 +312,12 @@ h1 {
   cursor: pointer;
   font: inherit;
   font-weight: 700;
+  transition: color 160ms ease, transform 160ms ease;
+}
+
+.task-progress-meta button:hover {
+  color: #7f4434;
+  transform: translateX(-2px);
 }
 
 .input-tab {
@@ -255,6 +334,7 @@ h1 {
 .input-tab.active {
   color: #f6f6f1;
   background: #24483f;
+  box-shadow: 0 5px 12px rgba(36, 72, 63, 0.15);
 }
 
 .upload-zone {
@@ -382,6 +462,13 @@ h1 {
   background: #24483f;
   font-size: 11px;
   font-weight: 600;
+  transition: background 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.primary-button:hover:not(:disabled) {
+  background: #2d584d;
+  box-shadow: 0 7px 16px rgba(36, 72, 63, 0.16);
+  transform: translateY(-1px);
 }
 
 .primary-button:disabled {
@@ -389,12 +476,32 @@ h1 {
   opacity: 0.58;
 }
 
-.message {
+.message,
+.global-message {
   margin-top: 12px;
   padding: 11px 12px;
   border-radius: 10px;
   font-size: 11px;
   line-height: 1.6;
+}
+
+.global-message {
+  position: relative;
+  margin: 0 0 14px;
+  padding: 13px 42px 13px 15px;
+  border: 1px solid rgba(196, 107, 89, 0.18);
+  box-shadow: 0 10px 24px rgba(125, 69, 53, 0.08);
+}
+
+.global-message::before {
+  display: inline-block;
+  margin-right: 8px;
+  content: "!";
+  font-weight: 800;
+}
+
+.global-message.is-visible {
+  animation: message-enter 260ms ease both;
 }
 
 .error-message {
@@ -465,6 +572,7 @@ h1 {
   gap: 16px;
   padding: 17px 4px;
   border-bottom: 1px solid rgba(30, 60, 52, 0.09);
+  animation: transcript-enter 340ms ease both;
 }
 
 .transcript-meta {
@@ -502,10 +610,21 @@ h1 {
 }
 
 .focus-card {
-  padding: 24px;
+  display: flex;
+  min-height: 565px;
+  padding: 28px;
+  flex-direction: column;
+  justify-content: center;
   border-radius: 15px;
   background: #24483f;
   color: #ecf2ed;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.08), 0 18px 32px rgba(36, 72, 63, 0.13);
+  transition: box-shadow 240ms ease, transform 240ms ease;
+}
+
+.focus-card:hover {
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.1), 0 22px 38px rgba(36, 72, 63, 0.17);
+  transform: translateY(-2px);
 }
 
 .focus-card h4 {
@@ -537,6 +656,10 @@ h1 {
 .focus-meter span:first-child,
 .focus-meter span.active {
   background: #e99d79;
+}
+
+.focus-meter span.active {
+  animation: meter-pulse 1.8s ease-in-out infinite;
 }
 
 .insight-stack {
@@ -655,6 +778,86 @@ h1 {
 
 .action-arrow {
   color: #aa735c;
+  transition: transform 160ms ease;
+}
+
+.action-button:hover .action-arrow {
+  transform: translateX(3px);
+}
+
+.custom-question {
+  margin-top: 12px;
+  padding: 13px;
+  border: 1px solid rgba(36, 72, 63, 0.11);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.42);
+}
+
+.custom-question label {
+  display: block;
+  margin-bottom: 8px;
+  color: #34584d;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.custom-question-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.custom-question textarea {
+  width: 100%;
+  min-height: 54px;
+  padding: 9px 10px;
+  resize: vertical;
+  color: #33483f;
+  border: 1px solid rgba(36, 72, 63, 0.13);
+  border-radius: 9px;
+  outline: none;
+  background: rgba(251, 252, 247, 0.9);
+  font: inherit;
+  font-size: 10px;
+  line-height: 1.6;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.custom-question textarea:focus {
+  border-color: rgba(177, 106, 78, 0.48);
+  box-shadow: 0 0 0 3px rgba(177, 106, 78, 0.09);
+}
+
+.custom-question-button {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  color: #f7f7f2;
+  border: 0;
+  border-radius: 9px;
+  background: #24483f;
+  cursor: pointer;
+  transition: background 160ms ease, transform 160ms ease;
+}
+
+.custom-question-button:hover:not(:disabled) {
+  background: #b16a4e;
+  transform: translateX(2px);
+}
+
+.custom-question-button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.custom-question small {
+  display: block;
+  margin-top: 7px;
+  color: #909990;
+  font-size: 8px;
+  line-height: 1.5;
 }
 
 .privacy-card {
@@ -710,6 +913,62 @@ h1 {
   color: #77857d;
   font-size: 9px;
   line-height: 1.7;
+}
+
+@keyframes panel-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes message-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes transcript-enter {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes progress-shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes meter-pulse {
+  50% {
+    opacity: 0.48;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
 }
 
 @media (max-width: 1180px) {

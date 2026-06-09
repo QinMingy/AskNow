@@ -68,6 +68,7 @@ AssistAction = Literal[
     "question",
     "catchup",
     "actions",
+    "custom",
 ]
 
 
@@ -75,6 +76,7 @@ class AssistRequest(BaseModel):
     action: AssistAction
     segments: list[TranscriptSegment]
     window_seconds: int = 60
+    custom_prompt: str | None = None
 
 
 class AssistResponse(BaseModel):
