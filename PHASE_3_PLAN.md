@@ -9,7 +9,7 @@ preserving faster-whisper as the transcription engine.
 
 ```text
 audio -> faster-whisper transcript segments
-      -> pyannote speaker turns
+      -> pyannote community-1 speaker turns
       -> maximum-overlap alignment
       -> transcript segments with normalized Speaker A/B labels
 ```

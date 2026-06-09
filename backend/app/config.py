@@ -11,7 +11,7 @@ class Settings(BaseModel):
     whisper_device: str = "cuda"
     whisper_compute_type: str = "float16"
     diarization_provider: str = "pyannote"
-    diarization_model: str = "pyannote/speaker-diarization-3.1"
+    diarization_model: str = "pyannote/speaker-diarization-community-1"
     diarization_device: str = "cuda"
     huggingface_token: str | None = None
     assist_provider: str = "litellm"
@@ -37,7 +37,7 @@ def get_settings() -> Settings:
         diarization_provider=os.getenv("DIARIZATION_PROVIDER", "pyannote"),
         diarization_model=os.getenv(
             "DIARIZATION_MODEL",
-            "pyannote/speaker-diarization-3.1",
+            "pyannote/speaker-diarization-community-1",
         ),
         diarization_device=os.getenv("DIARIZATION_DEVICE", "cuda"),
         huggingface_token=(

@@ -5,7 +5,7 @@ This project uses two separate local model stages:
 ```text
 audio
   -> faster-whisper: speech-to-text and timestamps
-  -> pyannote/speaker-diarization-3.1: speaker time ranges
+  -> pyannote/speaker-diarization-community-1: speaker time ranges
   -> overlap alignment: transcript segments with Speaker A/B labels
 ```
 
@@ -17,8 +17,7 @@ The model is gated. Before the first run:
 
 1. Sign in to Hugging Face.
 2. Accept the conditions for:
-   - `https://huggingface.co/pyannote/segmentation-3.0`
-   - `https://huggingface.co/pyannote/speaker-diarization-3.1`
+   - `https://huggingface.co/pyannote/speaker-diarization-community-1`
 3. Create a User Access Token at `https://huggingface.co/settings/tokens`.
 4. A read token is sufficient. Do not grant write access.
 
@@ -43,6 +42,13 @@ Pyannote 4 also requires a recent CUDA PyTorch stack and FFmpeg for TorchCodec:
 ```
 
 The pinned Python requirements use CUDA 12.8 builds of PyTorch and torchaudio.
+If the environment was upgraded from pyannote.audio 3.x, remove the obsolete
+`speechbrain` package because pyannote.audio 4.x no longer uses it:
+
+```powershell
+& "$env:USERPROFILE\miniforge3\envs\whisperproject\python.exe" `
+  -m pip uninstall -y speechbrain
+```
 
 ## Configuration
 
@@ -50,7 +56,7 @@ Real speaker diarization is the default:
 
 ```powershell
 $env:DIARIZATION_PROVIDER="pyannote"
-$env:DIARIZATION_MODEL="pyannote/speaker-diarization-3.1"
+$env:DIARIZATION_MODEL="pyannote/speaker-diarization-community-1"
 $env:DIARIZATION_DEVICE="cuda"
 $env:HUGGINGFACE_API_KEY="hf_your_read_token"
 ```

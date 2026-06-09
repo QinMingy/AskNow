@@ -33,7 +33,7 @@ class PyannoteDiarizer:
                 detail=(
                     "Pyannote speaker diarization requires a Hugging Face token. "
                     "Accept access for "
-                    "`pyannote/segmentation-3.0` and `pyannote/speaker-diarization-3.1`, "
+                    "`pyannote/speaker-diarization-community-1`, "
                     "then set the HUGGINGFACE_API_KEY environment variable."
                 ),
             )
