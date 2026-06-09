@@ -99,9 +99,17 @@ The Phase 5C frontend sends:
 ```text
 mime_type: audio/wav;codecs=pcm_s16le
 channels: 1
+sample rate: 16000 Hz
 sample width: 16-bit
+transport chunk: 200 ms
 ```
 
 Every binary frame is a complete, independently decodable WAV file. The
 backend validates matching channel count, sample width, and sample rate before
 combining chunks into the sliding inference window.
+
+The browser sends one transport chunk at a time and waits for a `buffer_status`
+acknowledgement. During backpressure, new microphone audio remains in the
+browser queue instead of being discarded. The backend aggregates short
+transport chunks into roughly one-second inference batches so transport
+responsiveness does not force one Whisper inference per packet.

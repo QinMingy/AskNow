@@ -8,8 +8,9 @@ incremental subtitles while preserving the local-first product experience.
 ## Audio Strategy
 
 The project does not require a system FFmpeg installation for browser capture.
-The frontend uses the Web Audio API to collect mono floating-point samples and
-encodes each chunk as an independently decodable PCM WAV file.
+The frontend uses the Web Audio API to collect mono floating-point samples,
+downsamples them to 16 kHz, and encodes each 200 ms transport chunk as an
+independently decodable PCM WAV file.
 
 The backend validates each WAV chunk and rebuilds the current sliding window as
 one normalized PCM WAV file before faster-whisper inference.
@@ -28,6 +29,9 @@ may not contain the headers needed for independent decoding.
 - [x] Render revisable partial subtitles differently from final subtitles
 - [x] Display processing, revision, elapsed time, and backpressure states
 - [x] Pause outgoing audio when server backpressure is degraded or full
+- [x] Keep unsent audio in a client queue instead of dropping it during backpressure
+- [x] Send one chunk at a time and wait for server acknowledgement
+- [x] Aggregate short transport chunks into roughly one-second inference batches
 - [x] Send remaining tail audio when recording stops
 - [x] Wait for final transcript confirmation before closing
 - [x] Reuse live subtitles as understanding-assistant context
@@ -36,6 +40,7 @@ may not contain the headers needed for independent decoding.
 
 - ScriptProcessorNode is broadly supported but deprecated. A future iteration
   should move sample collection into an AudioWorklet.
+- The local queue is memory-backed and has no reconnect persistence yet.
 - Incremental speaker diarization is not enabled. Live subtitles use
   `Unknown` until a later speaker revision stage.
 - Browsers may apply echo cancellation and noise suppression differently.

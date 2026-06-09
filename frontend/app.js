@@ -1,6 +1,8 @@
 const API_BASE_URL = "http://127.0.0.1:8010";
-const REQUIRED_API_VERSION = "0.7.0";
-const STREAM_CHUNK_DURATION_MS = 1000;
+const REQUIRED_API_VERSION = "0.8.0";
+const STREAM_CHUNK_DURATION_MS = 200;
+const STREAM_TARGET_SAMPLE_RATE = 16000;
+const STREAM_STOP_FLUSH_TIMEOUT_MS = 30000;
 const acceptedExtensions = [".mp3", ".wav", ".m4a", ".mp4"];
 const assistActionLabels = {
   explain: "解释刚刚发生了什么",
@@ -56,6 +58,10 @@ let liveFinalSegments = [];
 let livePartialSegments = [];
 let liveSampleBuffers = [];
 let liveSampleCount = 0;
+let livePendingChunks = [];
+let livePendingMs = 0;
+let liveInFlightChunk = null;
+let liveDrainTimer = null;
 
 const elements = {
   audioInput: document.querySelector("#audioInput"),
@@ -166,6 +172,20 @@ function encodePcmWav(samples, sampleRate) {
   return buffer;
 }
 
+function downsampleAudio(samples, inputRate, outputRate) {
+  if (inputRate === outputRate) return samples;
+  const ratio = inputRate / outputRate;
+  const output = new Float32Array(Math.round(samples.length / ratio));
+  for (let outputIndex = 0; outputIndex < output.length; outputIndex += 1) {
+    const start = Math.floor(outputIndex * ratio);
+    const end = Math.min(samples.length, Math.floor((outputIndex + 1) * ratio));
+    let sum = 0;
+    for (let inputIndex = start; inputIndex < end; inputIndex += 1) sum += samples[inputIndex];
+    output[outputIndex] = sum / Math.max(1, end - start);
+  }
+  return output;
+}
+
 function collectLiveSamples(samples) {
   liveSampleBuffers.push(new Float32Array(samples));
   liveSampleCount += samples.length;
@@ -182,19 +202,79 @@ function collectLiveSamples(samples) {
       else liveSampleBuffers[0] = current.subarray(take);
       liveSampleCount -= take;
     }
-    sendLiveAudioChunk(chunk);
+    queueLiveAudioChunk(chunk);
   }
 }
 
-function sendLiveAudioChunk(samples, durationMs = STREAM_CHUNK_DURATION_MS) {
-  if (!liveCanSend || !liveSocket || liveSocket.readyState !== WebSocket.OPEN) return;
-  liveSequence += 1;
+function queueLiveAudioChunk(samples, durationMs = STREAM_CHUNK_DURATION_MS) {
+  if (!liveAudioContext) return;
+  const normalized = downsampleAudio(samples, liveAudioContext.sampleRate, STREAM_TARGET_SAMPLE_RATE);
+  livePendingChunks.push({
+    sequence: null,
+    durationMs: Math.max(1, Math.round(durationMs)),
+    payload: encodePcmWav(normalized, STREAM_TARGET_SAMPLE_RATE),
+  });
+  livePendingMs += durationMs;
+  updateLiveBacklog();
+  drainLiveAudioQueue();
+}
+
+function drainLiveAudioQueue() {
+  window.clearTimeout(liveDrainTimer);
+  liveDrainTimer = null;
+  if (
+    !liveCanSend ||
+    liveInFlightChunk ||
+    !livePendingChunks.length ||
+    !liveSocket ||
+    liveSocket.readyState !== WebSocket.OPEN
+  ) return;
+
+  const chunk = livePendingChunks[0];
+  if (!chunk.sequence) {
+    liveSequence += 1;
+    chunk.sequence = liveSequence;
+  }
+  liveInFlightChunk = chunk;
   liveSocket.send(JSON.stringify({
     type: "audio_chunk",
-    sequence: liveSequence,
-    duration_ms: Math.max(1, Math.round(durationMs)),
+    sequence: chunk.sequence,
+    duration_ms: chunk.durationMs,
   }));
-  liveSocket.send(encodePcmWav(samples, liveAudioContext.sampleRate));
+  liveSocket.send(chunk.payload);
+}
+
+function scheduleLiveQueueDrain(delayMs = 30) {
+  window.clearTimeout(liveDrainTimer);
+  liveDrainTimer = window.setTimeout(drainLiveAudioQueue, delayMs);
+}
+
+function acknowledgeLiveChunk(session) {
+  if (!liveInFlightChunk || (session.last_sequence || 0) < liveInFlightChunk.sequence) return;
+  const acknowledged = livePendingChunks.shift();
+  livePendingMs = Math.max(0, livePendingMs - acknowledged.durationMs);
+  liveInFlightChunk = null;
+}
+
+function updateLiveBacklog(serverQueuedMs = 0) {
+  elements.liveBackpressure.textContent = `${(serverQueuedMs / 1000).toFixed(1)}s 服务端 · ${(livePendingMs / 1000).toFixed(1)}s 本地`;
+}
+
+function waitForLiveQueueToFlush() {
+  const startedAt = Date.now();
+  return new Promise((resolve) => {
+    const check = () => {
+      if (!livePendingChunks.length && !liveInFlightChunk) {
+        resolve(true);
+      } else if (Date.now() - startedAt >= STREAM_STOP_FLUSH_TIMEOUT_MS) {
+        resolve(false);
+      } else {
+        scheduleLiveQueueDrain(0);
+        window.setTimeout(check, 100);
+      }
+    };
+    check();
+  });
 }
 
 function updateTaskProgress(task) {
@@ -494,13 +574,15 @@ function updateLiveTimer() {
 
 function updateLiveSessionStatus(session) {
   if (!session) return;
-  elements.liveBackpressure.textContent = `${((session.queued_ms || 0) / 1000).toFixed(1)} 秒`;
+  acknowledgeLiveChunk(session);
+  updateLiveBacklog(session.queued_ms || 0);
   elements.liveRevision.textContent = String(session.revision || 0);
   liveCanSend = !["degraded", "full"].includes(session.backpressure);
   elements.liveBackpressure.classList.toggle("is-warning", !liveCanSend);
   elements.liveHint.textContent = liveCanSend
     ? "麦克风音频正在本机处理，可修订字幕会在稳定后自动确认。"
-    : "服务端处理积压，客户端暂缓发送新音频，避免延迟继续增长。";
+    : "服务端处理积压，未发送音频正在本地排队，不会直接丢弃。";
+  scheduleLiveQueueDrain();
 }
 
 function mergeLiveSegments(finalSegments = [], partialSegments = null) {
@@ -527,8 +609,10 @@ function handleLiveEvent(event) {
     elements.livePulse.classList.toggle("is-processing", event.state === "processing");
   } else if (event.type === "backpressure") {
     liveCanSend = event.level === "normal" || event.level === "warning";
-    elements.liveBackpressure.textContent = `${((event.queued_ms || 0) / 1000).toFixed(1)} 秒`;
+    if (event.level === "full") liveInFlightChunk = null;
+    updateLiveBacklog(event.queued_ms || 0);
     elements.liveBackpressure.classList.toggle("is-warning", !liveCanSend);
+    scheduleLiveQueueDrain();
   } else if (event.type === "transcript_partial") {
     elements.liveRevision.textContent = String(event.revision || 0);
     mergeLiveSegments([], event.segments || []);
@@ -555,6 +639,9 @@ async function startLiveSession() {
   liveCanSend = true;
   liveSampleBuffers = [];
   liveSampleCount = 0;
+  livePendingChunks = [];
+  livePendingMs = 0;
+  liveInFlightChunk = null;
   renderLiveTranscript();
   elements.startLiveButton.disabled = true;
   elements.liveStatus.textContent = "正在请求麦克风权限";
@@ -569,7 +656,7 @@ async function startLiveSession() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         mime_type: "audio/wav;codecs=pcm_s16le",
-        sample_rate: liveAudioContext.sampleRate,
+        sample_rate: STREAM_TARGET_SAMPLE_RATE,
         channels: 1,
         chunk_duration_ms: STREAM_CHUNK_DURATION_MS,
       }),
@@ -614,21 +701,24 @@ async function startLiveSession() {
 
 async function stopLiveSession() {
   elements.stopLiveButton.disabled = true;
-  elements.liveStatus.textContent = "正在确认最后字幕";
+  elements.liveStatus.textContent = "正在发送剩余音频";
   await stopLiveCapture();
+  const flushed = await waitForLiveQueueToFlush();
+  if (!flushed) showError("本地音频队列未能在 30 秒内排空，最后一小段音频可能未转写。");
+  elements.liveStatus.textContent = "正在确认最后字幕";
   if (liveSocket?.readyState === WebSocket.OPEN) liveSocket.send(JSON.stringify({ type: "stop" }));
 }
 
 async function stopLiveCapture() {
   if (liveProcessorNode) liveProcessorNode.onaudioprocess = null;
-  if (liveSampleCount && liveAudioContext && liveCanSend) {
+  if (liveSampleCount && liveAudioContext) {
     const tail = new Float32Array(liveSampleCount);
     let offset = 0;
     liveSampleBuffers.forEach((samples) => {
       tail.set(samples, offset);
       offset += samples.length;
     });
-    sendLiveAudioChunk(tail, tail.length / liveAudioContext.sampleRate * 1000);
+    queueLiveAudioChunk(tail, tail.length / liveAudioContext.sampleRate * 1000);
   }
   liveSampleBuffers = [];
   liveSampleCount = 0;
@@ -644,6 +734,11 @@ async function stopLiveCapture() {
 
 async function releaseLiveResources() {
   await stopLiveCapture();
+  window.clearTimeout(liveDrainTimer);
+  liveDrainTimer = null;
+  livePendingChunks = [];
+  livePendingMs = 0;
+  liveInFlightChunk = null;
   if (liveSocket && liveSocket.readyState < WebSocket.CLOSING) liveSocket.close();
   liveSocket = null;
 }

@@ -29,6 +29,7 @@ class Settings(BaseModel):
     stream_session_retention_seconds: int = 3600
     stream_processor: str = "whisper"
     stream_window_ms: int = 20000
+    stream_process_interval_ms: int = 1000
     stream_finalize_delay_ms: int = 8000
     stream_stable_revisions: int = 2
     stream_worker_count: int = 2
@@ -82,6 +83,7 @@ def get_settings() -> Settings:
         ),
         stream_processor=os.getenv("STREAM_PROCESSOR", "whisper"),
         stream_window_ms=int(os.getenv("STREAM_WINDOW_MS", "20000")),
+        stream_process_interval_ms=int(os.getenv("STREAM_PROCESS_INTERVAL_MS", "1000")),
         stream_finalize_delay_ms=int(os.getenv("STREAM_FINALIZE_DELAY_MS", "8000")),
         stream_stable_revisions=int(os.getenv("STREAM_STABLE_REVISIONS", "2")),
         stream_worker_count=int(os.getenv("STREAM_WORKER_COUNT", "2")),

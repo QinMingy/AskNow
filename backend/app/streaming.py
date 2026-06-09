@@ -81,6 +81,7 @@ class StreamSessionManager:
         processor: StreamProcessor | None = None,
         gpu_scheduler: GpuScheduler | None = None,
         window_ms: int = 20000,
+        process_interval_ms: int = 1000,
         finalize_delay_ms: int = 8000,
         stable_revisions: int = 2,
         worker_count: int = 2,
@@ -97,6 +98,7 @@ class StreamSessionManager:
         self.processor = processor
         self.gpu_scheduler = gpu_scheduler or GpuScheduler(1)
         self.window_ms = max(1000, window_ms)
+        self.process_interval_ms = max(100, process_interval_ms)
         self.finalize_delay_ms = max(0, finalize_delay_ms)
         self.stable_revisions = max(1, stable_revisions)
         self.stop_timeout_seconds = max(0.1, stop_timeout_seconds)
@@ -399,6 +401,8 @@ class StreamSessionManager:
     def _consume_available(self, session: StreamSession) -> list[AudioChunk]:
         consumed = []
         with self._lock:
+            if session.state not in {"stopped", "cancelled"} and session.queued_ms < self.process_interval_ms:
+                return consumed
             while session.chunks:
                 chunk = session.chunks.popleft()
                 consumed.append(chunk)

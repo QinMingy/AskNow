@@ -311,6 +311,44 @@ def test_stream_worker_consumes_chunks_and_publishes_transcript_events():
     manager.shutdown()
 
 
+def test_stream_worker_batches_small_transport_chunks_before_inference():
+    class FakeProcessor:
+        def __init__(self):
+            self.windows = []
+
+        def process(self, chunks, *, mime_type, window_start_ms):
+            self.windows.append([chunk.sequence for chunk in chunks])
+            return []
+
+    processor = FakeProcessor()
+    manager = StreamSessionManager(processor=processor, process_interval_ms=1000)
+    created = create_session(manager)
+
+    for sequence in range(1, 5):
+        manager.add_chunk(
+            created.session_id,
+            sequence=sequence,
+            duration_ms=200,
+            payload=b"audio",
+        )
+    time.sleep(0.1)
+    assert processor.windows == []
+
+    manager.add_chunk(
+        created.session_id,
+        sequence=5,
+        duration_ms=200,
+        payload=b"audio",
+    )
+
+    deadline = time.time() + 2
+    while time.time() < deadline and not processor.windows:
+        time.sleep(0.01)
+
+    assert processor.windows == [[1, 2, 3, 4, 5]]
+    manager.shutdown()
+
+
 def test_stream_websocket_pushes_incremental_transcript_without_client_polling():
     class FakeProcessor:
         def process(self, chunks, *, mime_type, window_start_ms):

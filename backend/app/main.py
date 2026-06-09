@@ -60,7 +60,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Classroom Comprehension Assistant API",
-    version="0.7.0",
+    version="0.8.0",
     lifespan=lifespan,
 )
 
@@ -181,6 +181,7 @@ def get_stream_session_manager() -> StreamSessionManager:
         processor=processor,
         gpu_scheduler=get_gpu_scheduler(),
         window_ms=settings.stream_window_ms,
+        process_interval_ms=settings.stream_process_interval_ms,
         finalize_delay_ms=settings.stream_finalize_delay_ms,
         stable_revisions=settings.stream_stable_revisions,
         worker_count=settings.stream_worker_count,

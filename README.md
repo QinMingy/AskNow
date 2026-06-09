@@ -14,6 +14,8 @@ audio windows, and revisable partial/final transcript events. See
 
 Phase 5C connects the browser microphone using independently decodable PCM WAV
 chunks and renders live partial/final subtitles. See `PHASE_5C_PLAN.md`.
+The live path uses 200 ms acknowledged transport chunks, a lossless client-side
+backpressure queue, and roughly one-second server-side inference batches.
 
 课堂/会议中的实时理解无障碍助手第一阶段 Demo。
 

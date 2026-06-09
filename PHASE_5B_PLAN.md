@@ -58,6 +58,7 @@ the chosen browser codec and normalize it into a reliably decodable format.
 ```powershell
 $env:STREAM_PROCESSOR="whisper"
 $env:STREAM_WINDOW_MS="20000"
+$env:STREAM_PROCESS_INTERVAL_MS="1000"
 $env:STREAM_FINALIZE_DELAY_MS="8000"
 $env:STREAM_STABLE_REVISIONS="2"
 $env:STREAM_WORKER_COUNT="2"
