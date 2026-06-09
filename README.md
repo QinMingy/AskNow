@@ -24,6 +24,11 @@ missing, the backend downloads it once and clearly logs download start,
 completion, local path, and elapsed time. Set `FUNASR_OFFLINE_ONLY=true` when
 the deployment must reject missing models instead of downloading.
 
+When a live microphone session stops, the backend performs an offline
+second-pass refinement and sends an explicit transcript revision with improved
+text, timestamps, and speaker labels. Set `STREAM_REFINEMENT_ENABLED=false` to
+disable this stop-time refinement.
+
 课堂/会议中的实时理解无障碍助手第一阶段 Demo。
 
 这个项目不是普通会议纪要工具。第一阶段先完成一个本地 Web Demo：上传课堂/会议录音，或粘贴 B 站、YouTube 视频链接后，系统使用本地 `faster-whisper` 进行转写，并在三栏界面里展示字幕、时间戳、模拟说话人和后续 AI 辅助入口。

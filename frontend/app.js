@@ -692,6 +692,12 @@ function reconcileLiveTranscript(segments) {
 function handleLiveEvent(event) {
   if (event.type === "session_ready" || event.type === "buffer_status") {
     updateLiveSessionStatus(event.session);
+  } else if (event.type === "refinement_status") {
+    elements.liveProcessing.textContent = event.state === "processing"
+      ? "\u6b63\u5728\u4f18\u5316\u5b57\u5e55\u4e0e\u8bc6\u522b\u53d1\u8a00\u8005"
+      : event.state === "complete"
+        ? "\u5b57\u5e55\u4e0e\u53d1\u8a00\u8005\u4fee\u8ba2\u5b8c\u6210"
+        : "\u5b57\u5e55\u4fee\u8ba2\u5931\u8d25";
   } else if (event.type === "processing_status") {
     elements.liveProcessing.textContent = event.state === "initializing"
       ? "模型初始化中"
@@ -711,7 +717,17 @@ function handleLiveEvent(event) {
   } else if (event.type === "transcript_final") {
     elements.liveRevision.textContent = String(event.revision || 0);
     mergeLiveSegments(event.segments || [], null);
-  } else if (event.type === "processing_error" || event.type === "error") {
+  } else if (event.type === "transcript_revision") {
+    elements.liveRevision.textContent = String(event.revision || 0);
+    liveFinalSegments = event.segments || [];
+    livePartialSegments = [];
+    latestResult = {
+      language: "zh",
+      duration: Math.max(0, ...liveFinalSegments.map((segment) => segment.end || 0)),
+      segments: [...liveFinalSegments],
+    };
+    scheduleLiveTranscriptRender({ immediate: true });
+  } else if (event.type === "processing_error" || event.type === "refinement_error" || event.type === "error") {
     showError(event.detail || "实时字幕处理失败。");
   } else if (event.type === "session_stopped") {
     finishLiveUi();

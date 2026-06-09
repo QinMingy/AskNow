@@ -11,6 +11,19 @@ def test_funasr_allows_missing_model_download_by_default(monkeypatch):
         get_settings.cache_clear()
 
 
+def test_stream_refinement_is_enabled_by_default(monkeypatch):
+    monkeypatch.delenv("STREAM_REFINEMENT_ENABLED", raising=False)
+    monkeypatch.delenv("STREAM_REFINEMENT_TIMEOUT_SECONDS", raising=False)
+    get_settings.cache_clear()
+
+    try:
+        settings = get_settings()
+        assert settings.stream_refinement_enabled is True
+        assert settings.stream_refinement_timeout_seconds == 600
+    finally:
+        get_settings.cache_clear()
+
+
 def test_huggingface_api_key_is_preferred(monkeypatch):
     monkeypatch.setenv("HUGGINGFACE_API_KEY", "primary-token")
     monkeypatch.setenv("HF_TOKEN", "fallback-token")

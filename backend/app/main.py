@@ -39,7 +39,11 @@ from .schemas import (
 )
 from .sources import SourceRegistry, create_default_registry
 from .streaming import StreamSessionManager, handle_stream_websocket
-from .stream_processing import FunASRStreamProcessor, WhisperStreamProcessor
+from .stream_processing import (
+    FunASRStreamProcessor,
+    WhisperStreamFinalizer,
+    WhisperStreamProcessor,
+)
 from .tasks import TaskManager
 from .transcriber import WhisperTranscriber
 
@@ -180,6 +184,7 @@ def get_stream_session_manager() -> StreamSessionManager:
             model=settings.funasr_stream_model,
             device=settings.funasr_device,
             offline_only=settings.funasr_offline_only,
+            hotwords=settings.funasr_hotwords,
         )
     elif processor_name in {"none", "disabled", "off"}:
         processor = None
@@ -192,6 +197,11 @@ def get_stream_session_manager() -> StreamSessionManager:
         degraded_ms=settings.stream_backpressure_degraded_ms,
         retention_seconds=settings.stream_session_retention_seconds,
         processor=processor,
+        finalizer=(
+            WhisperStreamFinalizer(get_transcriber())
+            if settings.stream_refinement_enabled
+            else None
+        ),
         gpu_scheduler=get_gpu_scheduler(),
         window_ms=settings.stream_window_ms,
         process_interval_ms=settings.stream_process_interval_ms,
@@ -199,6 +209,7 @@ def get_stream_session_manager() -> StreamSessionManager:
         stable_revisions=settings.stream_stable_revisions,
         worker_count=settings.stream_worker_count,
         stop_timeout_seconds=settings.stream_stop_timeout_seconds,
+        refinement_timeout_seconds=settings.stream_refinement_timeout_seconds,
     )
 
 

@@ -49,6 +49,7 @@ class FunASRStreamProcessor:
         encoder_chunk_look_back: int = 4,
         decoder_chunk_look_back: int = 1,
         offline_only: bool = False,
+        hotwords: str | None = None,
         model_factory=None,
         model_downloader=None,
     ):
@@ -58,6 +59,7 @@ class FunASRStreamProcessor:
         self.encoder_chunk_look_back = encoder_chunk_look_back
         self.decoder_chunk_look_back = decoder_chunk_look_back
         self.offline_only = offline_only
+        self.hotwords = hotwords.strip() if hotwords and hotwords.strip() else None
         self._model_factory = model_factory
         self._model_downloader = model_downloader
         self._model = None
@@ -103,7 +105,7 @@ class FunASRStreamProcessor:
             len(speech),
             is_final,
         )
-        result = self._get_model().generate(
+        generate_options = dict(
             input=speech,
             cache=state.cache,
             is_final=is_final,
@@ -111,6 +113,9 @@ class FunASRStreamProcessor:
             encoder_chunk_look_back=self.encoder_chunk_look_back,
             decoder_chunk_look_back=self.decoder_chunk_look_back,
         )
+        if self.hotwords:
+            generate_options["hotword"] = self.hotwords
+        result = self._get_model().generate(**generate_options)
         texts = [
             str(item.get("text", "")).strip()
             for item in (result or [])
@@ -275,6 +280,36 @@ class WhisperStreamProcessor:
             path.unlink(missing_ok=True)
 
 
+class WhisperStreamFinalizer:
+    """Refine a complete live recording with offline ASR and diarization."""
+
+    def __init__(self, transcriber):
+        self.transcriber = transcriber
+
+    def finalize(
+        self,
+        chunks: list[ProcessingAudioChunk],
+        *,
+        sample_rate: int,
+        channels: int,
+    ) -> list[TranscriptSegment]:
+        if not chunks:
+            return []
+        with NamedTemporaryFile(delete=False, suffix=".wav") as audio_file:
+            path = Path(audio_file.name)
+            audio_file.write(
+                build_raw_pcm_wav(
+                    chunks,
+                    sample_rate=sample_rate,
+                    channels=channels,
+                )
+            )
+        try:
+            return self.transcriber.transcribe_path(path).segments
+        finally:
+            path.unlink(missing_ok=True)
+
+
 class TranscriptRevisionTracker:
     def __init__(self, *, finalize_delay_ms: int = 8000, stable_revisions: int = 2):
         self.finalize_delay_ms = max(0, finalize_delay_ms)
@@ -418,4 +453,21 @@ def build_pcm_wav_window(chunks: list[ProcessingAudioChunk]) -> bytes:
         target.setsampwidth(sample_width)
         target.setframerate(sample_rate)
         target.writeframes(b"".join(frames))
+    return output.getvalue()
+
+
+def build_raw_pcm_wav(
+    chunks: list[ProcessingAudioChunk],
+    *,
+    sample_rate: int,
+    channels: int,
+) -> bytes:
+    if not chunks:
+        raise ValueError("At least one raw PCM chunk is required.")
+    output = BytesIO()
+    with wave.open(output, "wb") as target:
+        target.setnchannels(channels)
+        target.setsampwidth(2)
+        target.setframerate(sample_rate)
+        target.writeframes(b"".join(chunk.payload for chunk in chunks))
     return output.getvalue()

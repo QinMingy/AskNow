@@ -1,4 +1,5 @@
 import time
+import wave
 
 import pytest
 from fastapi import HTTPException
@@ -7,11 +8,13 @@ from fastapi.testclient import TestClient
 from app.main import app, get_stream_session_manager
 from app.schemas import StreamSessionCreateRequest, TranscriptSegment
 from app.stream_processing import (
+    build_raw_pcm_wav,
     build_pcm_wav_window,
     FunASRStreamProcessor,
     ProcessingAudioChunk,
     resolve_funasr_model_path,
     TranscriptRevisionTracker,
+    WhisperStreamFinalizer,
     WhisperStreamProcessor,
 )
 from app.streaming import AudioChunk, StreamSessionManager
@@ -430,6 +433,115 @@ def test_websocket_stop_waits_for_final_transcript_before_closing():
     assert event_types.index("transcript_final") < event_types.index("session_stopped")
 
 
+def test_stopped_pcm_stream_emits_offline_transcript_and_speaker_revision():
+    class FakeIncrementalProcessor:
+        incremental = True
+
+        def create_session(self, **kwargs):
+            return {}
+
+        def process_incremental(self, chunks, **kwargs):
+            return [
+                TranscriptSegment(
+                    id=1,
+                    start=0,
+                    end=0.2,
+                    speaker="Speaker pending",
+                    text="live draft",
+                )
+            ]
+
+    class FakeFinalizer:
+        def finalize(self, chunks, *, sample_rate, channels):
+            assert len(chunks) == 1
+            assert sample_rate == 16000
+            assert channels == 1
+            return [
+                TranscriptSegment(
+                    id=1,
+                    start=0,
+                    end=0.2,
+                    speaker="Speaker A",
+                    text="refined transcript",
+                )
+            ]
+
+    manager = StreamSessionManager(
+        processor=FakeIncrementalProcessor(),
+        finalizer=FakeFinalizer(),
+        process_interval_ms=200,
+    )
+    created = manager.create(
+        StreamSessionCreateRequest(
+            mime_type="audio/pcm;format=s16le",
+            sample_rate=16000,
+            channels=1,
+            chunk_duration_ms=200,
+        )
+    )
+    manager.add_chunk(
+        created.session_id,
+        sequence=1,
+        duration_ms=200,
+        payload=b"\x00\x00" * 3200,
+    )
+    manager.stop_and_wait(created.session_id)
+
+    events = []
+    while event := manager.wait_for_event(created.session_id, timeout=0.01):
+        events.append(event)
+        manager.acknowledge_event(created.session_id)
+
+    revision = next(event for event in events if event["type"] == "transcript_revision")
+    assert revision["replace_all"] is True
+    assert revision["segments"][0]["speaker"] == "Speaker A"
+    assert revision["segments"][0]["text"] == "refined transcript"
+    assert manager._get(created.session_id).recording == []
+    manager.shutdown()
+
+
+def test_whisper_stream_finalizer_builds_pcm_wav_for_offline_pipeline():
+    seen = {}
+
+    class FakeResponse:
+        segments = [
+            TranscriptSegment(
+                id=1,
+                start=0,
+                end=0.2,
+                speaker="Speaker A",
+                text="refined",
+            )
+        ]
+
+    class FakeTranscriber:
+        def transcribe_path(self, path):
+            with wave.open(str(path), "rb") as source:
+                seen["channels"] = source.getnchannels()
+                seen["sample_rate"] = source.getframerate()
+                seen["frames"] = source.readframes(source.getnframes())
+            return FakeResponse()
+
+    finalizer = WhisperStreamFinalizer(FakeTranscriber())
+    result = finalizer.finalize(
+        [ProcessingAudioChunk(1, 200, b"\x01\x00" * 3200)],
+        sample_rate=16000,
+        channels=1,
+    )
+
+    assert result[0].speaker == "Speaker A"
+    assert seen == {
+        "channels": 1,
+        "sample_rate": 16000,
+        "frames": b"\x01\x00" * 3200,
+    }
+
+
+def test_build_raw_pcm_wav_rejects_empty_recording():
+    with pytest.raises(ValueError, match="At least one raw PCM chunk"):
+        build_raw_pcm_wav([], sample_rate=16000, channels=1)
+
+
 def test_whisper_stream_processor_writes_encoded_window_to_temporary_file():
     seen = {}
 
@@ -461,7 +573,10 @@ def test_funasr_stream_processor_uses_raw_pcm_and_per_session_cache():
             kwargs["cache"]["seen"] = True
             return [{"text": "实时识别"}]
 
-    processor = FunASRStreamProcessor(model_factory=lambda **_: FakeModel())
+    processor = FunASRStreamProcessor(
+        model_factory=lambda **_: FakeModel(),
+        hotwords="AskNow 人机共生",
+    )
     first_state = processor.create_session(
         mime_type="audio/pcm;format=s16le",
         sample_rate=16000,
@@ -484,6 +599,7 @@ def test_funasr_stream_processor_uses_raw_pcm_and_per_session_cache():
     assert segments[0].speaker == "Speaker pending"
     assert calls[0]["input"].shape == (3200,)
     assert calls[0]["chunk_size"] == [0, 10, 5]
+    assert calls[0]["hotword"] == "AskNow 人机共生"
     assert first_state.cache == {"seen": True}
     assert second_state.cache == {}
 

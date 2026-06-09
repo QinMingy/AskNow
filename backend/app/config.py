@@ -33,10 +33,13 @@ class Settings(BaseModel):
     funasr_stream_model: str = "paraformer-zh-streaming"
     funasr_device: str = "cuda"
     funasr_offline_only: bool = False
+    funasr_hotwords: str | None = None
     stream_finalize_delay_ms: int = 8000
     stream_stable_revisions: int = 2
     stream_worker_count: int = 2
     stream_stop_timeout_seconds: float = 30.0
+    stream_refinement_enabled: bool = True
+    stream_refinement_timeout_seconds: float = 600.0
     ytdlp_cookies_file: str | None = None
     ytdlp_user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -91,10 +94,16 @@ def get_settings() -> Settings:
         funasr_device=os.getenv("FUNASR_DEVICE", "cuda"),
         funasr_offline_only=os.getenv("FUNASR_OFFLINE_ONLY", "false").lower()
         not in {"0", "false", "no", "off"},
+        funasr_hotwords=os.getenv("FUNASR_HOTWORDS"),
         stream_finalize_delay_ms=int(os.getenv("STREAM_FINALIZE_DELAY_MS", "8000")),
         stream_stable_revisions=int(os.getenv("STREAM_STABLE_REVISIONS", "2")),
         stream_worker_count=int(os.getenv("STREAM_WORKER_COUNT", "2")),
         stream_stop_timeout_seconds=float(os.getenv("STREAM_STOP_TIMEOUT_SECONDS", "30")),
+        stream_refinement_enabled=os.getenv("STREAM_REFINEMENT_ENABLED", "true").lower()
+        not in {"0", "false", "no", "off"},
+        stream_refinement_timeout_seconds=float(
+            os.getenv("STREAM_REFINEMENT_TIMEOUT_SECONDS", "600")
+        ),
         ytdlp_cookies_file=os.getenv("YTDLP_COOKIES_FILE"),
         ytdlp_user_agent=os.getenv(
             "YTDLP_USER_AGENT",

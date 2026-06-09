@@ -80,11 +80,16 @@ background worker and pushes events without requiring client polling:
 {"type":"buffer_status","session":{"queued_ms":0,"processed_ms":2000}}
 {"type":"transcript_partial","revision":1,"segments":[]}
 {"type":"transcript_final","revision":2,"segments":[]}
+{"type":"transcript_revision","revision":3,"replace_all":true,"segments":[]}
+{"type":"refinement_status","state":"processing"}
 {"type":"processing_error","detail":"..."}
+{"type":"refinement_error","detail":"..."}
 ```
 
 Partial segments may be replaced by later revisions. Final segments are stable
-and must not be rewritten by clients. Legacy sliding-window processors promote
+within the live pass. A `transcript_revision` event is an explicit second-pass
+replacement of the complete transcript; clients must replace all existing
+segments when `replace_all` is true. Legacy sliding-window processors promote
 stable partials to final segments; the default FunASR incremental processor
 commits each newly decoded text fragment directly.
 
@@ -126,9 +131,11 @@ The frontend groups adjacent FunASR fragments into stable display turns and
 updates only the active turn. Existing subtitle nodes are preserved, so older
 lines do not replay animations or force the user's scroll position to jump.
 
-Reliable speaker attribution and overlapping-speech separation require a
-separate diarization/revision stage. They should be emitted later as explicit
-speaker revision events rather than silently rewriting live identities.
+When recording stops, the backend assembles the complete PCM recording and
+runs a higher-accuracy offline transcription plus the configured diarizer.
+The resulting `transcript_revision` event replaces the live fragments with
+revised text, timestamps, and `Speaker A/B` labels. If refinement fails, the
+original live transcript remains available and a `refinement_error` is emitted.
 
 The backend starts loading the FunASR model during FastAPI startup. If audio
 arrives before warm-up completes, capture continues and the client receives a
@@ -143,7 +150,10 @@ STREAM_PROCESSOR=funasr
 FUNASR_STREAM_MODEL=paraformer-zh-streaming
 FUNASR_DEVICE=cuda
 FUNASR_OFFLINE_ONLY=false
+FUNASR_HOTWORDS=AskNow 人机共生 课堂助手
 STREAM_PROCESS_INTERVAL_MS=600
+STREAM_REFINEMENT_ENABLED=true
+STREAM_REFINEMENT_TIMEOUT_SECONDS=600
 ```
 
 The backend always prefers a complete local ModelScope cache directory. If it
@@ -151,3 +161,18 @@ is missing and `FUNASR_OFFLINE_ONLY=false` (the default), the backend logs
 `funasr.model.download.start`, downloads the model once, then logs the final
 local path and elapsed time before loading it. Set `FUNASR_OFFLINE_ONLY=true`
 when deployment must fail instead of downloading.
+
+`FUNASR_HOTWORDS` is optional. Set it to space-separated course terminology,
+names, or acronyms to improve recognition of domain-specific words during the
+live FunASR pass.
+
+`STREAM_REFINEMENT_ENABLED=true` enables the stop-time second pass. The current
+refiner reuses the project's higher-accuracy faster-whisper and Pyannote
+pipeline while the live path remains FunASR-only. Set it to `false` when the
+lowest possible stop latency is more important than corrected text and speaker
+labels.
+
+The WebSocket remains open while refinement runs, up to
+`STREAM_REFINEMENT_TIMEOUT_SECONDS`. This timeout is separate from the normal
+stream stop timeout because offline ASR and diarization can take longer for a
+long classroom recording.

@@ -14,6 +14,7 @@ from fastapi import HTTPException, WebSocket, WebSocketDisconnect, status
 
 from .schemas import (
     BackpressureLevel,
+    IncrementalTranscriptSegment,
     StreamSessionCreateRequest,
     StreamSessionCreatedResponse,
     StreamSessionState,
@@ -59,11 +60,13 @@ class StreamSession:
     processed_ms: int = 0
     history: deque[AudioChunk] = field(default_factory=deque)
     history_ms: int = 0
+    recording: list[AudioChunk] = field(default_factory=list)
     events: queue.Queue = field(default_factory=lambda: queue.Queue(maxsize=100))
     wake_worker: threading.Event = field(default_factory=threading.Event)
     worker_future: Future | None = None
     transcript: TranscriptRevisionTracker | None = None
     processor_state: object | None = None
+    refinement_attempted: bool = False
     created_at: datetime = field(default_factory=utc_now)
     updated_at: datetime = field(default_factory=utc_now)
     connected_at: datetime | None = None
@@ -80,6 +83,7 @@ class StreamSessionManager:
         degraded_ms: int = 15000,
         retention_seconds: int = 3600,
         processor: StreamProcessor | None = None,
+        finalizer=None,
         gpu_scheduler: GpuScheduler | None = None,
         window_ms: int = 20000,
         process_interval_ms: int = 1000,
@@ -87,6 +91,7 @@ class StreamSessionManager:
         stable_revisions: int = 2,
         worker_count: int = 2,
         stop_timeout_seconds: float = 30.0,
+        refinement_timeout_seconds: float = 600.0,
     ):
         self.max_buffer_ms = max(1000, max_buffer_ms)
         self.max_chunk_bytes = max(1, max_chunk_bytes)
@@ -97,12 +102,17 @@ class StreamSessionManager:
         )
         self.retention = timedelta(seconds=max(60, retention_seconds))
         self.processor = processor
+        self.finalizer = finalizer
         self.gpu_scheduler = gpu_scheduler or GpuScheduler(1)
         self.window_ms = max(1000, window_ms)
         self.process_interval_ms = max(100, process_interval_ms)
         self.finalize_delay_ms = max(0, finalize_delay_ms)
         self.stable_revisions = max(1, stable_revisions)
         self.stop_timeout_seconds = max(0.1, stop_timeout_seconds)
+        self.refinement_timeout_seconds = max(
+            self.stop_timeout_seconds,
+            refinement_timeout_seconds,
+        )
         self._executor = ThreadPoolExecutor(
             max_workers=max(1, worker_count),
             thread_name_prefix="stream-processor",
@@ -288,12 +298,17 @@ class StreamSessionManager:
         session = self._get(session_id)
         if session.worker_future is not None:
             try:
-                session.worker_future.result(timeout=self.stop_timeout_seconds)
+                timeout = (
+                    self.refinement_timeout_seconds
+                    if self.finalizer is not None
+                    else self.stop_timeout_seconds
+                )
+                session.worker_future.result(timeout=timeout)
             except FutureTimeoutError:
                 logger.warning(
                     "stream.session.stop_timeout session_id=%s timeout_seconds=%s",
                     session_id,
-                    self.stop_timeout_seconds,
+                    timeout,
                 )
         return self.get_status(session_id) if status_response.state == "stopped" else status_response
 
@@ -346,6 +361,8 @@ class StreamSessionManager:
                             segments=[item.model_dump(mode="json") for item in finalized],
                         )
                 self._mark_closed(session, state)
+                if state == "cancelled":
+                    session.recording.clear()
                 session.wake_worker.set()
             response = self._status(session)
         logger.info("stream.session.%s session_id=%s", response.state, session_id)
@@ -429,8 +446,18 @@ class StreamSessionManager:
                 logger.exception("stream.worker.failed session_id=%s", session_id)
                 self._publish(session, "processing_error", detail=str(exc))
             with self._lock:
-                if session.state in {"stopped", "cancelled"} and not session.chunks:
-                    return
+                should_close = session.state in {"stopped", "cancelled"} and not session.chunks
+                should_refine = (
+                    session.state == "stopped"
+                    and self.finalizer is not None
+                    and not session.refinement_attempted
+                )
+                if should_refine:
+                    session.refinement_attempted = True
+            if should_refine:
+                self._refine_complete_recording(session)
+            if should_close:
+                return
 
     def _consume_available(self, session: StreamSession) -> list[AudioChunk]:
         consumed = []
@@ -450,6 +477,7 @@ class StreamSessionManager:
                 session.processed_ms += chunk.duration_ms
                 session.history.append(chunk)
                 session.history_ms += chunk.duration_ms
+                session.recording.append(chunk)
                 if (
                     incremental
                     and session.state not in {"stopped", "cancelled"}
@@ -538,6 +566,72 @@ class StreamSessionManager:
             self._publish(session, "processing_error", detail=str(exc))
         finally:
             self._publish(session, "processing_status", state="idle")
+
+    def _refine_complete_recording(self, session: StreamSession) -> None:
+        if "pcm" not in session.mime_type.lower():
+            logger.warning(
+                "stream.refinement.skipped session_id=%s reason=unsupported_mime mime_type=%s",
+                session.session_id,
+                session.mime_type,
+            )
+            session.recording.clear()
+            return
+        chunks = [
+            ProcessingAudioChunk(chunk.sequence, chunk.duration_ms, chunk.payload)
+            for chunk in session.recording
+        ]
+        if not chunks:
+            return
+        logger.info(
+            "stream.refinement.start session_id=%s duration_ms=%s",
+            session.session_id,
+            session.processed_ms,
+        )
+        self._publish(session, "refinement_status", state="processing")
+        try:
+            with self.gpu_scheduler.acquire():
+                refined = self.finalizer.finalize(
+                    chunks,
+                    sample_rate=session.sample_rate,
+                    channels=session.channels,
+                )
+        except Exception as exc:
+            logger.exception("stream.refinement.failed session_id=%s", session.session_id)
+            self._publish(session, "refinement_error", detail=str(exc))
+            self._publish(session, "refinement_status", state="failed")
+            session.recording.clear()
+            return
+        session.transcript.revision += 1
+        session.transcript.final_segments = [
+            IncrementalTranscriptSegment(
+                id=f"refined-{segment.id}",
+                start=segment.start,
+                end=segment.end,
+                speaker=segment.speaker,
+                text=segment.text,
+                revision=session.transcript.revision,
+                final=True,
+            )
+            for segment in refined
+        ]
+        session.transcript.partial_segments = []
+        self._publish(
+            session,
+            "transcript_revision",
+            revision=session.transcript.revision,
+            replace_all=True,
+            segments=[
+                item.model_dump(mode="json") for item in session.transcript.final_segments
+            ],
+        )
+        self._publish(session, "refinement_status", state="complete")
+        logger.info(
+            "stream.refinement.complete session_id=%s segments=%s speakers=%s",
+            session.session_id,
+            len(refined),
+            len({segment.speaker for segment in refined}),
+        )
+        session.recording.clear()
 
     @staticmethod
     def _publish(record: StreamSession, event_type: str, **payload) -> None:
