@@ -66,6 +66,7 @@ def main() -> int:
         "torch": check_python_package("torch"),
         "torchaudio": check_python_package("torchaudio"),
         "pyannote.audio": check_python_package("pyannote.audio"),
+        "torchcodec": check_python_package("torchcodec"),
         "uvicorn": check_python_package("uvicorn"),
         "yt_dlp": check_python_package("yt_dlp"),
         "Hugging Face token": "configured"
@@ -78,6 +79,7 @@ def main() -> int:
         "nvidia-smi": run_version(
             ["nvidia-smi", "--query-gpu=name,driver_version", "--format=csv,noheader"]
         ),
+        "ffmpeg": run_version(["ffmpeg", "-version"]),
         "torch CUDA": check_torch_cuda(),
         "cublas64_12.dll": check_dll("cublas64_12.dll"),
         "cudnn64_9.dll": check_dll("cudnn64_9.dll"),

@@ -40,7 +40,7 @@ class PyannoteDiarizer:
 
             self._pipeline = Pipeline.from_pretrained(
                 self.model,
-                use_auth_token=self.token,
+                token=self.token,
             )
             if self._pipeline is None:
                 raise RuntimeError(
@@ -71,7 +71,8 @@ class PyannoteDiarizer:
             return segments
 
         try:
-            diarization = self._load_pipeline()(str(audio_path))
+            output = self._load_pipeline()(str(audio_path))
+            diarization = getattr(output, "speaker_diarization", output)
             turns = [
                 (float(turn.start), float(turn.end), str(speaker))
                 for turn, _, speaker in diarization.itertracks(yield_label=True)

@@ -32,6 +32,18 @@ $env:HUGGINGFACE_API_KEY="hf_your_read_token"
 The first transcription downloads the gated model into the Hugging Face cache.
 Later runs use the local cache unless the model needs updating.
 
+## Pyannote 4 GPU environment
+
+The project uses pyannote.audio 4.x and its newer `token=` authentication API.
+Pyannote 4 also requires a recent CUDA PyTorch stack and FFmpeg for TorchCodec:
+
+```powershell
+& "$env:USERPROFILE\miniforge3\Scripts\conda.exe" install `
+  -n whisperproject -y -c conda-forge "ffmpeg<8"
+```
+
+The pinned Python requirements use CUDA 12.8 builds of PyTorch and torchaudio.
+
 ## Configuration
 
 Real speaker diarization is the default:
