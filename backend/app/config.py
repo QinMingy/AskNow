@@ -32,6 +32,7 @@ class Settings(BaseModel):
     stream_process_interval_ms: int = 600
     funasr_stream_model: str = "paraformer-zh-streaming"
     funasr_device: str = "cuda"
+    funasr_offline_only: bool = True
     stream_finalize_delay_ms: int = 8000
     stream_stable_revisions: int = 2
     stream_worker_count: int = 2
@@ -88,6 +89,8 @@ def get_settings() -> Settings:
         stream_process_interval_ms=int(os.getenv("STREAM_PROCESS_INTERVAL_MS", "600")),
         funasr_stream_model=os.getenv("FUNASR_STREAM_MODEL", "paraformer-zh-streaming"),
         funasr_device=os.getenv("FUNASR_DEVICE", "cuda"),
+        funasr_offline_only=os.getenv("FUNASR_OFFLINE_ONLY", "true").lower()
+        not in {"0", "false", "no", "off"},
         stream_finalize_delay_ms=int(os.getenv("STREAM_FINALIZE_DELAY_MS", "8000")),
         stream_stable_revisions=int(os.getenv("STREAM_STABLE_REVISIONS", "2")),
         stream_worker_count=int(os.getenv("STREAM_WORKER_COUNT", "2")),

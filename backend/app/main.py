@@ -174,6 +174,7 @@ def get_stream_session_manager() -> StreamSessionManager:
         processor = FunASRStreamProcessor(
             model=settings.funasr_stream_model,
             device=settings.funasr_device,
+            offline_only=settings.funasr_offline_only,
         )
     elif processor_name in {"none", "disabled", "off"}:
         processor = None

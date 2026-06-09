@@ -514,10 +514,24 @@ def test_funasr_model_resolution_prefers_complete_local_cache(monkeypatch, tmp_p
     model_dir.mkdir(parents=True)
     (model_dir / "config.yaml").write_text("model: ParaformerStreaming", encoding="utf-8")
     (model_dir / "model.pt").write_bytes(b"model")
+    (model_dir / "tokens.json").write_text("[]", encoding="utf-8")
+    (model_dir / "am.mvn").write_bytes(b"mvn")
     monkeypatch.setattr("app.stream_processing.Path.home", lambda: tmp_path)
 
     assert resolve_funasr_model_path("paraformer-zh-streaming") == str(model_dir)
-    assert resolve_funasr_model_path("another-model") == "another-model"
+    with pytest.raises(FileNotFoundError, match="FUNASR_OFFLINE_ONLY"):
+        resolve_funasr_model_path("another-model")
+    assert (
+        resolve_funasr_model_path("another-model", offline_only=False)
+        == "another-model"
+    )
+
+
+def test_funasr_model_resolution_rejects_missing_local_model(monkeypatch, tmp_path):
+    monkeypatch.setattr("app.stream_processing.Path.home", lambda: tmp_path)
+
+    with pytest.raises(FileNotFoundError, match="Automatic download is disabled"):
+        resolve_funasr_model_path("paraformer-zh-streaming")
 
 
 def test_stream_manager_commits_incremental_processor_results():

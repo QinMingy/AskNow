@@ -142,5 +142,11 @@ Relevant environment variables:
 STREAM_PROCESSOR=funasr
 FUNASR_STREAM_MODEL=paraformer-zh-streaming
 FUNASR_DEVICE=cuda
+FUNASR_OFFLINE_ONLY=true
 STREAM_PROCESS_INTERVAL_MS=600
 ```
+
+`FUNASR_OFFLINE_ONLY=true` is the default. The backend resolves the model alias
+to a complete local ModelScope cache directory and passes that directory to
+FunASR. If the required local files are missing, startup warm-up fails with a
+clear error and never attempts a ModelScope download.

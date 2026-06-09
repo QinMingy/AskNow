@@ -47,6 +47,7 @@ class FunASRStreamProcessor:
         chunk_size: tuple[int, int, int] = (0, 10, 5),
         encoder_chunk_look_back: int = 4,
         decoder_chunk_look_back: int = 1,
+        offline_only: bool = True,
         model_factory=None,
     ):
         self.model_name = model
@@ -54,6 +55,7 @@ class FunASRStreamProcessor:
         self.chunk_size = list(chunk_size)
         self.encoder_chunk_look_back = encoder_chunk_look_back
         self.decoder_chunk_look_back = decoder_chunk_look_back
+        self.offline_only = offline_only
         self._model_factory = model_factory
         self._model = None
         self._model_lock = threading.Lock()
@@ -138,7 +140,10 @@ class FunASRStreamProcessor:
                     from funasr import AutoModel
 
                     self._model_factory = AutoModel
-                resolved_model = resolve_funasr_model_path(self.model_name)
+                resolved_model = resolve_funasr_model_path(
+                    self.model_name,
+                    offline_only=self.offline_only,
+                )
                 self._model = self._model_factory(
                     model=resolved_model,
                     device=self.device,
@@ -154,10 +159,15 @@ class FunASRStreamProcessor:
         return self._model
 
 
-def resolve_funasr_model_path(model: str) -> str:
+def resolve_funasr_model_path(model: str, *, offline_only: bool = True) -> str:
     supplied = Path(model).expanduser()
-    if supplied.exists():
+    if is_complete_funasr_model(supplied):
         return str(supplied)
+    if supplied.exists():
+        raise FileNotFoundError(
+            f"FunASR model directory is incomplete: {supplied}. "
+            "Expected config.yaml, model.pt, tokens.json, and am.mvn."
+        )
 
     cached_repositories = {
         "paraformer-zh-streaming": (
@@ -167,12 +177,27 @@ def resolve_funasr_model_path(model: str) -> str:
     }
     repository = cached_repositories.get(model)
     if repository is None:
+        if offline_only:
+            raise FileNotFoundError(
+                f"FUNASR_OFFLINE_ONLY is enabled and `{model}` is not a local model directory."
+            )
         return model
     cached = Path.home() / ".cache" / "modelscope" / "hub" / "models" / Path(*repository)
-    if (cached / "config.yaml").exists() and (cached / "model.pt").exists():
+    if is_complete_funasr_model(cached):
         logger.info("funasr.model.use_local_cache path=%s", cached)
         return str(cached)
+    if offline_only:
+        raise FileNotFoundError(
+            "FunASR streaming model is not installed locally. Automatic download is disabled. "
+            f"Expected a complete model at: {cached}. "
+            "Install the model ahead of time or set FUNASR_STREAM_MODEL to a complete local directory."
+        )
     return model
+
+
+def is_complete_funasr_model(path: Path) -> bool:
+    required = ("config.yaml", "model.pt", "tokens.json", "am.mvn")
+    return path.is_dir() and all((path / name).is_file() for name in required)
 
 
 class WhisperStreamProcessor:
