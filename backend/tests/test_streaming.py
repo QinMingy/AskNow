@@ -8,11 +8,13 @@ from app.main import app, get_stream_session_manager
 from app.schemas import StreamSessionCreateRequest, TranscriptSegment
 from app.stream_processing import (
     build_pcm_wav_window,
+    FunASRStreamProcessor,
     ProcessingAudioChunk,
+    resolve_funasr_model_path,
     TranscriptRevisionTracker,
     WhisperStreamProcessor,
 )
-from app.streaming import StreamSessionManager
+from app.streaming import AudioChunk, StreamSessionManager
 
 
 def create_session(manager: StreamSessionManager):
@@ -448,6 +450,168 @@ def test_whisper_stream_processor_writes_encoded_window_to_temporary_file():
     )
 
     assert seen == {"suffix": ".webm", "payload": b"firstsecond"}
+
+
+def test_funasr_stream_processor_uses_raw_pcm_and_per_session_cache():
+    calls = []
+
+    class FakeModel:
+        def generate(self, **kwargs):
+            calls.append(kwargs)
+            kwargs["cache"]["seen"] = True
+            return [{"text": "实时识别"}]
+
+    processor = FunASRStreamProcessor(model_factory=lambda **_: FakeModel())
+    first_state = processor.create_session(
+        mime_type="audio/pcm;format=s16le",
+        sample_rate=16000,
+        channels=1,
+    )
+    second_state = processor.create_session(
+        mime_type="audio/pcm;format=s16le",
+        sample_rate=16000,
+        channels=1,
+    )
+    segments = processor.process_incremental(
+        [ProcessingAudioChunk(1, 200, b"\x00\x00" * 3200)],
+        state=first_state,
+        mime_type="audio/pcm;format=s16le",
+        window_start_ms=0,
+        is_final=False,
+    )
+
+    assert segments[0].text == "实时识别"
+    assert calls[0]["input"].shape == (3200,)
+    assert calls[0]["chunk_size"] == [0, 10, 5]
+    assert first_state.cache == {"seen": True}
+    assert second_state.cache == {}
+
+
+def test_funasr_stream_processor_rejects_non_pcm_or_wrong_audio_shape():
+    processor = FunASRStreamProcessor(model_factory=lambda **_: object())
+
+    with pytest.raises(ValueError, match="raw PCM16"):
+        processor.create_session(mime_type="audio/wav", sample_rate=16000, channels=1)
+    with pytest.raises(ValueError, match="16 kHz mono"):
+        processor.create_session(
+            mime_type="audio/pcm;format=s16le",
+            sample_rate=48000,
+            channels=1,
+        )
+
+
+def test_funasr_model_resolution_prefers_complete_local_cache(monkeypatch, tmp_path):
+    model_dir = (
+        tmp_path
+        / ".cache"
+        / "modelscope"
+        / "hub"
+        / "models"
+        / "iic"
+        / "speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online"
+    )
+    model_dir.mkdir(parents=True)
+    (model_dir / "config.yaml").write_text("model: ParaformerStreaming", encoding="utf-8")
+    (model_dir / "model.pt").write_bytes(b"model")
+    monkeypatch.setattr("app.stream_processing.Path.home", lambda: tmp_path)
+
+    assert resolve_funasr_model_path("paraformer-zh-streaming") == str(model_dir)
+    assert resolve_funasr_model_path("another-model") == "another-model"
+
+
+def test_stream_manager_commits_incremental_processor_results():
+    class FakeIncrementalProcessor:
+        incremental = True
+
+        def create_session(self, **kwargs):
+            return {"calls": 0}
+
+        def process_incremental(self, chunks, *, state, mime_type, window_start_ms, is_final):
+            state["calls"] += 1
+            return [
+                TranscriptSegment(
+                    id=1,
+                    start=0,
+                    end=sum(chunk.duration_ms for chunk in chunks) / 1000,
+                    speaker="Unknown",
+                    text="增量结果",
+                )
+            ]
+
+    manager = StreamSessionManager(
+        processor=FakeIncrementalProcessor(),
+        process_interval_ms=600,
+    )
+    created = manager.create(
+        StreamSessionCreateRequest(
+            mime_type="audio/pcm;format=s16le",
+            sample_rate=16000,
+            channels=1,
+            chunk_duration_ms=200,
+        )
+    )
+    for sequence in range(1, 4):
+        manager.add_chunk(
+            created.session_id,
+            sequence=sequence,
+            duration_ms=200,
+            payload=b"\x00\x00" * 3200,
+        )
+
+    deadline = time.time() + 2
+    events = []
+    while time.time() < deadline:
+        event = manager.wait_for_event(created.session_id, timeout=0.1)
+        if event:
+            events.append(event)
+        if any(item["type"] == "transcript_final" for item in events):
+            break
+
+    final = next(item for item in events if item["type"] == "transcript_final")
+    status = manager.get_status(created.session_id)
+    assert final["segments"][0]["text"] == "增量结果"
+    assert final["segments"][0]["start"] == 0.0
+    assert final["segments"][0]["end"] == 0.6
+    assert status.final_segments == 1
+    manager.shutdown()
+
+
+def test_stream_manager_keeps_incremental_inference_batches_bounded():
+    class FakeIncrementalProcessor:
+        incremental = True
+
+        def __init__(self):
+            self.batches = []
+
+        def create_session(self, **kwargs):
+            return {}
+
+        def process_incremental(self, chunks, **kwargs):
+            self.batches.append(sum(chunk.duration_ms for chunk in chunks))
+            return []
+
+    processor = FakeIncrementalProcessor()
+    manager = StreamSessionManager(processor=processor, process_interval_ms=600)
+    created = manager.create(
+        StreamSessionCreateRequest(
+            mime_type="audio/pcm;format=s16le",
+            sample_rate=16000,
+            channels=1,
+            chunk_duration_ms=200,
+        )
+    )
+    session = manager._get(created.session_id)
+    with manager._lock:
+        for sequence in range(1, 7):
+            session.chunks.append(AudioChunk(sequence, 200, b"\x00\x00"))
+            session.queued_ms += 200
+
+    first = manager._consume_available(session)
+    second = manager._consume_available(session)
+
+    assert sum(chunk.duration_ms for chunk in first) == 600
+    assert sum(chunk.duration_ms for chunk in second) == 600
+    manager.shutdown()
 
 
 def test_pcm_wav_window_combines_independently_decodable_chunks():

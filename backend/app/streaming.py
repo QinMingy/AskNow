@@ -63,6 +63,7 @@ class StreamSession:
     wake_worker: threading.Event = field(default_factory=threading.Event)
     worker_future: Future | None = None
     transcript: TranscriptRevisionTracker | None = None
+    processor_state: object | None = None
     created_at: datetime = field(default_factory=utc_now)
     updated_at: datetime = field(default_factory=utc_now)
     connected_at: datetime | None = None
@@ -133,6 +134,15 @@ class StreamSessionManager:
                 stable_revisions=self.stable_revisions,
             ),
         )
+        if self.processor is not None and getattr(self.processor, "incremental", False):
+            try:
+                session.processor_state = self.processor.create_session(
+                    mime_type=session.mime_type,
+                    sample_rate=session.sample_rate,
+                    channels=session.channels,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
         with self._lock:
             self._sessions[session.session_id] = session
             if self.processor is not None:
@@ -390,7 +400,7 @@ class StreamSessionManager:
                         "buffer_status",
                         session=self.get_status(session.session_id).model_dump(mode="json"),
                     )
-                    self._process_window(session)
+                    self._process_window(session, consumed)
             except Exception as exc:
                 logger.exception("stream.worker.failed session_id=%s", session_id)
                 self._publish(session, "processing_error", detail=str(exc))
@@ -403,6 +413,11 @@ class StreamSessionManager:
         with self._lock:
             if session.state not in {"stopped", "cancelled"} and session.queued_ms < self.process_interval_ms:
                 return consumed
+            incremental = self.processor is not None and getattr(
+                self.processor,
+                "incremental",
+                False,
+            )
             while session.chunks:
                 chunk = session.chunks.popleft()
                 consumed.append(chunk)
@@ -411,33 +426,63 @@ class StreamSessionManager:
                 session.processed_ms += chunk.duration_ms
                 session.history.append(chunk)
                 session.history_ms += chunk.duration_ms
+                if (
+                    incremental
+                    and session.state not in {"stopped", "cancelled"}
+                    and sum(item.duration_ms for item in consumed) >= self.process_interval_ms
+                ):
+                    break
+            if session.chunks:
+                session.wake_worker.set()
             while session.history and session.history_ms > self.window_ms:
                 removed = session.history.popleft()
                 session.history_ms -= removed.duration_ms
             session.updated_at = utc_now()
         return consumed
 
-    def _process_window(self, session: StreamSession) -> None:
+    def _process_window(self, session: StreamSession, consumed: list[AudioChunk]) -> None:
         if self.processor is None or session.transcript is None:
             return
+        incremental = getattr(self.processor, "incremental", False)
+        source_chunks = consumed if incremental else session.history
         chunks = [
             ProcessingAudioChunk(chunk.sequence, chunk.duration_ms, chunk.payload)
-            for chunk in session.history
+            for chunk in source_chunks
         ]
-        window_start_ms = max(0, session.processed_ms - session.history_ms)
+        window_start_ms = (
+            max(0, session.processed_ms - sum(chunk.duration_ms for chunk in consumed))
+            if incremental
+            else max(0, session.processed_ms - session.history_ms)
+        )
         self._publish(session, "processing_status", state="processing")
         try:
             with self.gpu_scheduler.acquire():
-                segments = self.processor.process(
-                    chunks,
-                    mime_type=session.mime_type,
+                if incremental:
+                    segments = self.processor.process_incremental(
+                        chunks,
+                        state=session.processor_state,
+                        mime_type=session.mime_type,
+                        window_start_ms=window_start_ms,
+                        is_final=session.state == "stopped",
+                    )
+                else:
+                    segments = self.processor.process(
+                        chunks,
+                        mime_type=session.mime_type,
+                        window_start_ms=window_start_ms,
+                    )
+            if incremental:
+                newly_final = session.transcript.commit(
+                    segments,
                     window_start_ms=window_start_ms,
                 )
-            newly_final, partial = session.transcript.update(
-                segments,
-                window_start_ms=window_start_ms,
-                audio_end_ms=session.processed_ms,
-            )
+                partial = []
+            else:
+                newly_final, partial = session.transcript.update(
+                    segments,
+                    window_start_ms=window_start_ms,
+                    audio_end_ms=session.processed_ms,
+                )
             with self._lock:
                 stopped = session.state == "stopped"
                 cancelled = session.state == "cancelled"

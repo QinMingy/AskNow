@@ -46,7 +46,7 @@ if not exist "%FRONTEND_DIR%\index.html" (
 )
 
 echo Checking backend dependencies...
-"%ENV_PYTHON%" -c "import faster_whisper, requests, yt_dlp, torch, torchaudio, pyannote.audio, uvicorn" >nul 2>nul
+"%ENV_PYTHON%" -c "import faster_whisper, funasr, requests, yt_dlp, torch, torchaudio, pyannote.audio, uvicorn" >nul 2>nul
 if errorlevel 1 (
   echo [ERROR] Backend dependencies are incomplete.
   echo Run the environment installation command before starting the demo.

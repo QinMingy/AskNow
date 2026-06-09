@@ -12,10 +12,12 @@ Phase 5B adds background stream processing, a shared GPU scheduler, sliding
 audio windows, and revisable partial/final transcript events. See
 `PHASE_5B_PLAN.md`.
 
-Phase 5C connects the browser microphone using independently decodable PCM WAV
-chunks and renders live partial/final subtitles. See `PHASE_5C_PLAN.md`.
-The live path uses 200 ms acknowledged transport chunks, a lossless client-side
-backpressure queue, and roughly one-second server-side inference batches.
+Phase 5C connects the browser microphone and renders live incremental subtitles.
+The live path now uses local FunASR Paraformer Streaming with 200 ms acknowledged
+raw PCM16 transport chunks, a lossless client-side backpressure queue, and
+roughly 600 ms server-side inference batches. Uploaded audio and video URLs
+continue to use faster-whisper. See `PHASE_5C_PLAN.md` and
+`docs/STREAMING_PROTOCOL.md`.
 
 课堂/会议中的实时理解无障碍助手第一阶段 Demo。
 

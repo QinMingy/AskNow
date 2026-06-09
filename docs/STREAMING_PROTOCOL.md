@@ -84,9 +84,9 @@ background worker and pushes events without requiring client polling:
 ```
 
 Partial segments may be replaced by later revisions. Final segments are stable
-and must not be rewritten by clients. A segment becomes final when it is older
-than the configured finalization delay or remains unchanged across the
-configured number of revisions.
+and must not be rewritten by clients. Legacy sliding-window processors promote
+stable partials to final segments; the default FunASR incremental processor
+commits each newly decoded text fragment directly.
 
 For WebSocket clients, `stop` waits for the active processing window before
 emitting `session_stopped`, up to the configured stop timeout. This allows the
@@ -97,19 +97,29 @@ final transcript event to arrive before the socket closes.
 The Phase 5C frontend sends:
 
 ```text
-mime_type: audio/wav;codecs=pcm_s16le
+mime_type: audio/pcm;format=s16le
 channels: 1
 sample rate: 16000 Hz
 sample width: 16-bit
 transport chunk: 200 ms
 ```
 
-Every binary frame is a complete, independently decodable WAV file. The
-backend validates matching channel count, sample width, and sample rate before
-combining chunks into the sliding inference window.
+Every binary frame contains little-endian raw PCM16 samples. The backend
+validates the session format and keeps a separate FunASR streaming cache for
+each session.
 
 The browser sends one transport chunk at a time and waits for a `buffer_status`
 acknowledgement. During backpressure, new microphone audio remains in the
 browser queue instead of being discarded. The backend aggregates short
-transport chunks into roughly one-second inference batches so transport
-responsiveness does not force one Whisper inference per packet.
+transport chunks into roughly 600 ms inference batches. Uploaded audio and
+video URLs continue to use faster-whisper; only the live microphone path uses
+FunASR Paraformer Streaming.
+
+Relevant environment variables:
+
+```text
+STREAM_PROCESSOR=funasr
+FUNASR_STREAM_MODEL=paraformer-zh-streaming
+FUNASR_DEVICE=cuda
+STREAM_PROCESS_INTERVAL_MS=600
+```

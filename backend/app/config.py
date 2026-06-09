@@ -27,9 +27,11 @@ class Settings(BaseModel):
     stream_backpressure_warning_ms: int = 5000
     stream_backpressure_degraded_ms: int = 15000
     stream_session_retention_seconds: int = 3600
-    stream_processor: str = "whisper"
+    stream_processor: str = "funasr"
     stream_window_ms: int = 20000
-    stream_process_interval_ms: int = 1000
+    stream_process_interval_ms: int = 600
+    funasr_stream_model: str = "paraformer-zh-streaming"
+    funasr_device: str = "cuda"
     stream_finalize_delay_ms: int = 8000
     stream_stable_revisions: int = 2
     stream_worker_count: int = 2
@@ -81,9 +83,11 @@ def get_settings() -> Settings:
         stream_session_retention_seconds=int(
             os.getenv("STREAM_SESSION_RETENTION_SECONDS", "3600")
         ),
-        stream_processor=os.getenv("STREAM_PROCESSOR", "whisper"),
+        stream_processor=os.getenv("STREAM_PROCESSOR", "funasr"),
         stream_window_ms=int(os.getenv("STREAM_WINDOW_MS", "20000")),
-        stream_process_interval_ms=int(os.getenv("STREAM_PROCESS_INTERVAL_MS", "1000")),
+        stream_process_interval_ms=int(os.getenv("STREAM_PROCESS_INTERVAL_MS", "600")),
+        funasr_stream_model=os.getenv("FUNASR_STREAM_MODEL", "paraformer-zh-streaming"),
+        funasr_device=os.getenv("FUNASR_DEVICE", "cuda"),
         stream_finalize_delay_ms=int(os.getenv("STREAM_FINALIZE_DELAY_MS", "8000")),
         stream_stable_revisions=int(os.getenv("STREAM_STABLE_REVISIONS", "2")),
         stream_worker_count=int(os.getenv("STREAM_WORKER_COUNT", "2")),

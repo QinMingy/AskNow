@@ -1,5 +1,5 @@
 const API_BASE_URL = "http://127.0.0.1:8010";
-const REQUIRED_API_VERSION = "0.8.0";
+const REQUIRED_API_VERSION = "0.9.0";
 const STREAM_CHUNK_DURATION_MS = 200;
 const STREAM_TARGET_SAMPLE_RATE = 16000;
 const STREAM_STOP_FLUSH_TIMEOUT_MS = 30000;
@@ -146,28 +146,12 @@ function websocketUrl(path) {
   return `${API_BASE_URL.replace(/^http/, "ws")}${path}`;
 }
 
-function encodePcmWav(samples, sampleRate) {
-  const buffer = new ArrayBuffer(44 + samples.length * 2);
+function encodePcm16(samples) {
+  const buffer = new ArrayBuffer(samples.length * 2);
   const view = new DataView(buffer);
-  const writeText = (offset, text) => {
-    for (let index = 0; index < text.length; index += 1) view.setUint8(offset + index, text.charCodeAt(index));
-  };
-  writeText(0, "RIFF");
-  view.setUint32(4, 36 + samples.length * 2, true);
-  writeText(8, "WAVE");
-  writeText(12, "fmt ");
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * 2, true);
-  view.setUint16(32, 2, true);
-  view.setUint16(34, 16, true);
-  writeText(36, "data");
-  view.setUint32(40, samples.length * 2, true);
   samples.forEach((sample, index) => {
     const clipped = Math.max(-1, Math.min(1, sample));
-    view.setInt16(44 + index * 2, clipped < 0 ? clipped * 32768 : clipped * 32767, true);
+    view.setInt16(index * 2, clipped < 0 ? clipped * 32768 : clipped * 32767, true);
   });
   return buffer;
 }
@@ -212,7 +196,7 @@ function queueLiveAudioChunk(samples, durationMs = STREAM_CHUNK_DURATION_MS) {
   livePendingChunks.push({
     sequence: null,
     durationMs: Math.max(1, Math.round(durationMs)),
-    payload: encodePcmWav(normalized, STREAM_TARGET_SAMPLE_RATE),
+    payload: encodePcm16(normalized),
   });
   livePendingMs += durationMs;
   updateLiveBacklog();
@@ -655,7 +639,7 @@ async function startLiveSession() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        mime_type: "audio/wav;codecs=pcm_s16le",
+        mime_type: "audio/pcm;format=s16le",
         sample_rate: STREAM_TARGET_SAMPLE_RATE,
         channels: 1,
         chunk_duration_ms: STREAM_CHUNK_DURATION_MS,

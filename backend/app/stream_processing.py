@@ -1,4 +1,5 @@
 import logging
+import threading
 import wave
 from dataclasses import dataclass
 from io import BytesIO
@@ -27,6 +28,141 @@ class StreamProcessor(Protocol):
         window_start_ms: int,
     ) -> list[TranscriptSegment]:
         """Return segments relative to the supplied audio window."""
+
+
+@dataclass
+class FunASRSessionState:
+    cache: dict
+
+
+class FunASRStreamProcessor:
+    incremental = True
+
+    def __init__(
+        self,
+        *,
+        model: str = "paraformer-zh-streaming",
+        device: str = "cuda",
+        chunk_size: tuple[int, int, int] = (0, 10, 5),
+        encoder_chunk_look_back: int = 4,
+        decoder_chunk_look_back: int = 1,
+        model_factory=None,
+    ):
+        self.model_name = model
+        self.device = device
+        self.chunk_size = list(chunk_size)
+        self.encoder_chunk_look_back = encoder_chunk_look_back
+        self.decoder_chunk_look_back = decoder_chunk_look_back
+        self._model_factory = model_factory
+        self._model = None
+        self._model_lock = threading.Lock()
+
+    def create_session(self, *, mime_type: str, sample_rate: int, channels: int):
+        if "pcm" not in mime_type.lower():
+            raise ValueError("FunASR live sessions require raw PCM16 audio.")
+        if sample_rate != 16000 or channels != 1:
+            raise ValueError("FunASR live sessions require 16 kHz mono audio.")
+        return FunASRSessionState(cache={})
+
+    def process_incremental(
+        self,
+        chunks: list[ProcessingAudioChunk],
+        *,
+        state: FunASRSessionState,
+        mime_type: str,
+        window_start_ms: int,
+        is_final: bool,
+    ) -> list[TranscriptSegment]:
+        if not chunks:
+            return []
+        payload = b"".join(chunk.payload for chunk in chunks)
+        if len(payload) % 2:
+            raise ValueError("Raw PCM16 payload must contain complete 16-bit samples.")
+
+        import numpy as np
+
+        speech = np.frombuffer(payload, dtype="<i2").astype(np.float32) / 32768.0
+        logger.info(
+            "funasr.stream.inference start_ms=%s chunks=%s samples=%s is_final=%s",
+            window_start_ms,
+            len(chunks),
+            len(speech),
+            is_final,
+        )
+        result = self._get_model().generate(
+            input=speech,
+            cache=state.cache,
+            is_final=is_final,
+            chunk_size=self.chunk_size,
+            encoder_chunk_look_back=self.encoder_chunk_look_back,
+            decoder_chunk_look_back=self.decoder_chunk_look_back,
+        )
+        texts = [
+            str(item.get("text", "")).strip()
+            for item in (result or [])
+            if isinstance(item, dict) and str(item.get("text", "")).strip()
+        ]
+        duration = sum(chunk.duration_ms for chunk in chunks) / 1000
+        logger.info("funasr.stream.inference.complete texts=%s", len(texts))
+        return [
+            TranscriptSegment(
+                id=index,
+                start=0.0,
+                end=duration,
+                speaker="Unknown",
+                text=text,
+            )
+            for index, text in enumerate(texts, start=1)
+        ]
+
+    def _get_model(self):
+        if self._model is not None:
+            return self._model
+        with self._model_lock:
+            if self._model is None:
+                logger.info(
+                    "funasr.model.load model=%s device=%s",
+                    self.model_name,
+                    self.device,
+                )
+                if self._model_factory is None:
+                    from funasr import AutoModel
+
+                    self._model_factory = AutoModel
+                resolved_model = resolve_funasr_model_path(self.model_name)
+                self._model = self._model_factory(
+                    model=resolved_model,
+                    device=self.device,
+                    disable_update=True,
+                    disable_pbar=True,
+                )
+                logger.info(
+                    "funasr.model.ready model=%s resolved_model=%s",
+                    self.model_name,
+                    resolved_model,
+                )
+        return self._model
+
+
+def resolve_funasr_model_path(model: str) -> str:
+    supplied = Path(model).expanduser()
+    if supplied.exists():
+        return str(supplied)
+
+    cached_repositories = {
+        "paraformer-zh-streaming": (
+            "iic",
+            "speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online",
+        ),
+    }
+    repository = cached_repositories.get(model)
+    if repository is None:
+        return model
+    cached = Path.home() / ".cache" / "modelscope" / "hub" / "models" / Path(*repository)
+    if (cached / "config.yaml").exists() and (cached / "model.pt").exists():
+        logger.info("funasr.model.use_local_cache path=%s", cached)
+        return str(cached)
+    return model
 
 
 class WhisperStreamProcessor:
@@ -115,6 +251,36 @@ class TranscriptRevisionTracker:
         self.partial_segments = []
         self._stable_counts = {}
         return finalized
+
+    def commit(
+        self,
+        segments: list[TranscriptSegment],
+        *,
+        window_start_ms: int,
+    ) -> list[IncrementalTranscriptSegment]:
+        if not segments:
+            return []
+        self.revision += 1
+        committed = []
+        for index, segment in enumerate(segments, start=1):
+            start_ms = window_start_ms + round(segment.start * 1000)
+            end_ms = window_start_ms + round(segment.end * 1000)
+            text = segment.text.strip()
+            if not text:
+                continue
+            committed.append(
+                IncrementalTranscriptSegment(
+                    id=f"{start_ms}-{end_ms}-{self.revision}-{index}",
+                    start=round(start_ms / 1000, 2),
+                    end=round(end_ms / 1000, 2),
+                    speaker=segment.speaker,
+                    text=text,
+                    revision=self.revision,
+                    final=True,
+                )
+            )
+        self.final_segments.extend(committed)
+        return committed
 
     def _is_already_final(self, start_ms: int, end_ms: int) -> bool:
         return any(

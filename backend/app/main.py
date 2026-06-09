@@ -39,7 +39,7 @@ from .schemas import (
 )
 from .sources import SourceRegistry, create_default_registry
 from .streaming import StreamSessionManager, handle_stream_websocket
-from .stream_processing import WhisperStreamProcessor
+from .stream_processing import FunASRStreamProcessor, WhisperStreamProcessor
 from .tasks import TaskManager
 from .transcriber import WhisperTranscriber
 
@@ -60,7 +60,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Classroom Comprehension Assistant API",
-    version="0.8.0",
+    version="0.9.0",
     lifespan=lifespan,
 )
 
@@ -168,6 +168,11 @@ def get_stream_session_manager() -> StreamSessionManager:
     processor_name = settings.stream_processor.strip().lower()
     if processor_name == "whisper":
         processor = WhisperStreamProcessor(get_transcriber())
+    elif processor_name == "funasr":
+        processor = FunASRStreamProcessor(
+            model=settings.funasr_stream_model,
+            device=settings.funasr_device,
+        )
     elif processor_name in {"none", "disabled", "off"}:
         processor = None
     else:
@@ -196,6 +201,7 @@ def health(settings: Settings = Depends(get_settings)) -> HealthResponse:
         service=settings.app_name,
         api_version=app.version,
         asr_engine="faster-whisper",
+        live_asr_engine=settings.stream_processor,
         device=settings.whisper_device,
         diarization_provider=settings.diarization_provider,
         assist_provider=settings.assist_provider,

@@ -99,7 +99,7 @@
               </div>
               <span id="liveTimer">00:00</span>
             </div>
-            <p id="liveHint">音频仅发送到本机后端，并转换为可独立解码的 PCM WAV 音频块。</p>
+            <p id="liveHint">音频仅发送到本机后端，并以 16 kHz 单声道 PCM16 交给 FunASR 流式识别。</p>
             <div class="live-metrics">
               <span><small>处理状态</small><strong id="liveProcessing">空闲</strong></span>
               <span><small>音频队列</small><strong id="liveBackpressure">0.0s 服务端 · 0.0s 本地</strong></span>
@@ -199,6 +199,6 @@
         </aside>
       </section>
     </main>
-    <script src="./app.js?v=20260609-11"></script>
+    <script src="./app.js?v=20260609-12"></script>
   </body>
 </html>
