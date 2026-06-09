@@ -62,6 +62,49 @@ class TaskStatusResponse(BaseModel):
     error: str | None = None
 
 
+StreamSessionState = Literal[
+    "created",
+    "connected",
+    "active",
+    "stopped",
+    "cancelled",
+]
+BackpressureLevel = Literal["normal", "warning", "degraded", "full"]
+
+
+class StreamSessionCreateRequest(BaseModel):
+    mime_type: str = "audio/webm"
+    sample_rate: int = 48000
+    channels: int = 1
+    chunk_duration_ms: int = 1000
+
+
+class StreamSessionCreatedResponse(BaseModel):
+    session_id: str
+    websocket_url: str
+    status_url: str
+
+
+class StreamSessionStatusResponse(BaseModel):
+    session_id: str
+    state: StreamSessionState
+    mime_type: str
+    sample_rate: int
+    channels: int
+    chunk_duration_ms: int
+    queued_chunks: int
+    queued_ms: int
+    received_chunks: int
+    received_ms: int
+    dropped_chunks: int
+    last_sequence: int | None = None
+    backpressure: BackpressureLevel
+    created_at: datetime
+    updated_at: datetime
+    connected_at: datetime | None = None
+    stopped_at: datetime | None = None
+
+
 AssistAction = Literal[
     "explain",
     "conflict",

@@ -22,6 +22,11 @@ class Settings(BaseModel):
     task_worker_count: int = 4
     gpu_task_concurrency: int = 1
     task_retention_seconds: int = 3600
+    stream_buffer_max_ms: int = 30000
+    stream_chunk_max_bytes: int = 5 * 1024 * 1024
+    stream_backpressure_warning_ms: int = 5000
+    stream_backpressure_degraded_ms: int = 15000
+    stream_session_retention_seconds: int = 3600
     ytdlp_cookies_file: str | None = None
     ytdlp_user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -56,6 +61,19 @@ def get_settings() -> Settings:
         task_worker_count=int(os.getenv("TASK_WORKER_COUNT", "4")),
         gpu_task_concurrency=int(os.getenv("GPU_TASK_CONCURRENCY", "1")),
         task_retention_seconds=int(os.getenv("TASK_RETENTION_SECONDS", "3600")),
+        stream_buffer_max_ms=int(os.getenv("STREAM_BUFFER_MAX_MS", "30000")),
+        stream_chunk_max_bytes=int(
+            os.getenv("STREAM_CHUNK_MAX_BYTES", str(5 * 1024 * 1024))
+        ),
+        stream_backpressure_warning_ms=int(
+            os.getenv("STREAM_BACKPRESSURE_WARNING_MS", "5000")
+        ),
+        stream_backpressure_degraded_ms=int(
+            os.getenv("STREAM_BACKPRESSURE_DEGRADED_MS", "15000")
+        ),
+        stream_session_retention_seconds=int(
+            os.getenv("STREAM_SESSION_RETENTION_SECONDS", "3600")
+        ),
         ytdlp_cookies_file=os.getenv("YTDLP_COOKIES_FILE"),
         ytdlp_user_agent=os.getenv(
             "YTDLP_USER_AGENT",

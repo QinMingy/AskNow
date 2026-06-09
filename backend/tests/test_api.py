@@ -49,7 +49,7 @@ def test_health():
 
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
-    assert response.json()["api_version"] == "0.4.0"
+    assert response.json()["api_version"] == "0.5.0"
     assert response.json()["asr_engine"] == "faster-whisper"
     assert response.json()["diarization_provider"] == "pyannote"
     assert response.json()["assist_provider"] == "litellm"

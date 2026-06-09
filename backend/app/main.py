@@ -7,7 +7,15 @@ from functools import lru_cache
 from pathlib import Path
 from tempfile import mkdtemp
 
-from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    HTTPException,
+    Request,
+    UploadFile,
+    WebSocket,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import Settings, get_settings
@@ -20,12 +28,16 @@ from .schemas import (
     AssistRequest,
     AssistResponse,
     HealthResponse,
+    StreamSessionCreateRequest,
+    StreamSessionCreatedResponse,
+    StreamSessionStatusResponse,
     TaskCreatedResponse,
     TaskStatusResponse,
     TranscriptionResponse,
     VideoUrlRequest,
 )
 from .sources import SourceRegistry, create_default_registry
+from .streaming import StreamSessionManager, handle_stream_websocket
 from .tasks import TaskManager
 from .transcriber import WhisperTranscriber
 
@@ -39,11 +51,14 @@ async def lifespan(_: FastAPI):
     if get_task_manager.cache_info().currsize:
         logger.info("task_manager.shutdown")
         get_task_manager().shutdown()
+    if get_stream_session_manager.cache_info().currsize:
+        logger.info("stream_session_manager.shutdown")
+        get_stream_session_manager().shutdown()
 
 
 app = FastAPI(
     title="Classroom Comprehension Assistant API",
-    version="0.4.0",
+    version="0.5.0",
     lifespan=lifespan,
 )
 
@@ -136,6 +151,18 @@ def get_task_manager() -> TaskManager:
         worker_count=settings.task_worker_count,
         gpu_concurrency=settings.gpu_task_concurrency,
         retention_seconds=settings.task_retention_seconds,
+    )
+
+
+@lru_cache
+def get_stream_session_manager() -> StreamSessionManager:
+    settings = get_settings()
+    return StreamSessionManager(
+        max_buffer_ms=settings.stream_buffer_max_ms,
+        max_chunk_bytes=settings.stream_chunk_max_bytes,
+        warning_ms=settings.stream_backpressure_warning_ms,
+        degraded_ms=settings.stream_backpressure_degraded_ms,
+        retention_seconds=settings.stream_session_retention_seconds,
     )
 
 
@@ -245,6 +272,60 @@ def cancel_task(
     task_manager: TaskManager = Depends(get_task_manager),
 ) -> TaskStatusResponse:
     return task_manager.cancel(task_id)
+
+
+@app.post(
+    "/api/stream/sessions",
+    response_model=StreamSessionCreatedResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_stream_session(
+    request: StreamSessionCreateRequest,
+    manager: StreamSessionManager = Depends(get_stream_session_manager),
+) -> StreamSessionCreatedResponse:
+    return manager.create(request)
+
+
+@app.get(
+    "/api/stream/sessions/{session_id}",
+    response_model=StreamSessionStatusResponse,
+)
+def stream_session_status(
+    session_id: str,
+    manager: StreamSessionManager = Depends(get_stream_session_manager),
+) -> StreamSessionStatusResponse:
+    return manager.get_status(session_id)
+
+
+@app.post(
+    "/api/stream/sessions/{session_id}/stop",
+    response_model=StreamSessionStatusResponse,
+)
+def stop_stream_session(
+    session_id: str,
+    manager: StreamSessionManager = Depends(get_stream_session_manager),
+) -> StreamSessionStatusResponse:
+    return manager.stop(session_id)
+
+
+@app.delete(
+    "/api/stream/sessions/{session_id}",
+    response_model=StreamSessionStatusResponse,
+)
+def cancel_stream_session(
+    session_id: str,
+    manager: StreamSessionManager = Depends(get_stream_session_manager),
+) -> StreamSessionStatusResponse:
+    return manager.cancel(session_id)
+
+
+@app.websocket("/api/stream/sessions/{session_id}/ws")
+async def stream_session_websocket(
+    websocket: WebSocket,
+    session_id: str,
+    manager: StreamSessionManager = Depends(get_stream_session_manager),
+):
+    await handle_stream_websocket(websocket, session_id, manager)
 
 
 @app.post("/api/assist", response_model=AssistResponse)

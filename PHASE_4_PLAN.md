@@ -59,9 +59,9 @@ Legacy synchronous transcription endpoints remain available for compatibility.
 
 ## Before Real-Time Microphone Streaming
 
-- [ ] Define a streaming session schema separate from batch task records
-- [ ] Add WebSocket transport for audio chunks and server events
-- [ ] Add bounded audio chunk buffers and backpressure
+- [x] Define a streaming session schema separate from batch task records
+- [x] Add WebSocket transport for audio chunks and server events
+- [x] Add bounded audio chunk buffers and backpressure
 - [ ] Add incremental transcript revision rules
 - [ ] Decide how diarization updates revise recent speaker labels
 
