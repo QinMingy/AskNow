@@ -22,10 +22,10 @@ The model is gated. Before the first run:
 3. Create a User Access Token at `https://huggingface.co/settings/tokens`.
 4. A read token is sufficient. Do not grant write access.
 
-Set the token for the current PowerShell session:
+Set the token as an environment variable:
 
 ```powershell
-$env:HF_TOKEN="hf_your_read_token"
+$env:HUGGINGFACE_API_KEY="hf_your_read_token"
 .\start_demo.bat
 ```
 
@@ -40,7 +40,7 @@ Real speaker diarization is the default:
 $env:DIARIZATION_PROVIDER="pyannote"
 $env:DIARIZATION_MODEL="pyannote/speaker-diarization-3.1"
 $env:DIARIZATION_DEVICE="cuda"
-$env:HF_TOKEN="hf_your_read_token"
+$env:HUGGINGFACE_API_KEY="hf_your_read_token"
 ```
 
 To explicitly use simulated Speaker A/B labels for UI development:
@@ -61,5 +61,5 @@ clear error instead of presenting simulated labels as real speakers.
 ```
 
 The environment should report `torch CUDA`, `pyannote.audio`, and the existing
-faster-whisper CUDA libraries as available. `HF_TOKEN` is reported separately
+faster-whisper CUDA libraries as available. The Hugging Face token is reported separately
 because it is a user secret and is not stored in the repository.

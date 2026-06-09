@@ -16,9 +16,9 @@ if not defined DEEPSEEK_API_KEY if not defined ASSIST_API_KEY (
   echo.
 )
 
-if not defined HF_TOKEN if not defined HUGGINGFACE_ACCESS_TOKEN (
-  echo [WARNING] HF_TOKEN is not set. The default pyannote speaker diarization provider cannot download its gated model.
-  echo           Accept both pyannote model conditions and set HF_TOKEN, or explicitly set DIARIZATION_PROVIDER=mock.
+if not defined HUGGINGFACE_API_KEY if not defined HF_TOKEN if not defined HUGGINGFACE_ACCESS_TOKEN (
+  echo [WARNING] A Hugging Face token is not set. The default pyannote speaker diarization provider cannot download its gated model.
+  echo           Accept both pyannote model conditions and set HUGGINGFACE_API_KEY, or explicitly set DIARIZATION_PROVIDER=mock.
   echo.
 )
 

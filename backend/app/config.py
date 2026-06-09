@@ -40,7 +40,11 @@ def get_settings() -> Settings:
             "pyannote/speaker-diarization-3.1",
         ),
         diarization_device=os.getenv("DIARIZATION_DEVICE", "cuda"),
-        huggingface_token=os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_ACCESS_TOKEN"),
+        huggingface_token=(
+            os.getenv("HUGGINGFACE_API_KEY")
+            or os.getenv("HF_TOKEN")
+            or os.getenv("HUGGINGFACE_ACCESS_TOKEN")
+        ),
         assist_provider=os.getenv("ASSIST_PROVIDER", "litellm"),
         assist_base_url=os.getenv("ASSIST_BASE_URL", "https://api.deepseek.com/v1"),
         assist_model=os.getenv("ASSIST_MODEL", "deepseek-v4-flash"),

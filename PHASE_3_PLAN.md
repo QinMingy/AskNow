@@ -28,7 +28,7 @@ The diarization provider is replaceable. `pyannote` is the real provider and
 - [x] Add environment diagnostics
 - [x] Add unit tests
 - [x] Document Hugging Face authorization and Token usage
-- [ ] Set `HF_TOKEN` locally
+- [ ] Set `HUGGINGFACE_API_KEY` locally
 - [ ] Download gated model on first transcription
 - [ ] Validate with a real multi-speaker recording
 

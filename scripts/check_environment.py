@@ -68,8 +68,12 @@ def main() -> int:
         "pyannote.audio": check_python_package("pyannote.audio"),
         "uvicorn": check_python_package("uvicorn"),
         "yt_dlp": check_python_package("yt_dlp"),
-        "HF_TOKEN": "configured"
-        if os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_ACCESS_TOKEN")
+        "Hugging Face token": "configured"
+        if (
+            os.getenv("HUGGINGFACE_API_KEY")
+            or os.getenv("HF_TOKEN")
+            or os.getenv("HUGGINGFACE_ACCESS_TOKEN")
+        )
         else "not configured (required for pyannote model download)",
         "nvidia-smi": run_version(
             ["nvidia-smi", "--query-gpu=name,driver_version", "--format=csv,noheader"]
