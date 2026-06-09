@@ -3,12 +3,12 @@ setlocal EnableDelayedExpansion
 
 echo [Classroom Assistant] Stopping demo services...
 
-call :kill_window "Classroom Assistant Backend*"
-call :kill_window "Classroom Assistant Frontend*"
-
 call :kill_port 8010
 call :kill_port 8000
 call :kill_port 5173
+
+call :kill_window "Classroom Assistant Backend*"
+call :kill_window "Classroom Assistant Frontend*"
 
 echo.
 echo Done.

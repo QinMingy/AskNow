@@ -4,10 +4,9 @@ setlocal
 set "ROOT=%~dp0"
 set "CONDA_EXE=%USERPROFILE%\miniforge3\Scripts\conda.exe"
 set "CONDA_ENV=whisperproject"
+set "ENV_PYTHON=%USERPROFILE%\miniforge3\envs\%CONDA_ENV%\python.exe"
 set "BACKEND_DIR=%ROOT%backend"
 set "FRONTEND_DIR=%ROOT%frontend"
-set "BACKEND_RUNNER=%ROOT%scripts\run_backend.bat"
-set "FRONTEND_RUNNER=%ROOT%scripts\run_frontend.bat"
 
 echo [Classroom Assistant] Starting demo...
 
@@ -27,6 +26,13 @@ if errorlevel 1 (
   exit /b 1
 )
 
+if not exist "%ENV_PYTHON%" (
+  echo [ERROR] Conda environment Python was not found:
+  echo         %ENV_PYTHON%
+  pause
+  exit /b 1
+)
+
 if not exist "%BACKEND_DIR%\app\main.py" (
   echo [ERROR] Backend app was not found.
   pause
@@ -39,11 +45,28 @@ if not exist "%FRONTEND_DIR%\index.html" (
   exit /b 1
 )
 
+echo Checking backend dependencies...
+"%ENV_PYTHON%" -c "import faster_whisper, requests, yt_dlp, torch, torchaudio, pyannote.audio, uvicorn" >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] Backend dependencies are incomplete.
+  echo Run the environment installation command before starting the demo.
+  pause
+  exit /b 1
+)
+
+if not defined DEEPSEEK_API_KEY if not defined ASSIST_API_KEY (
+  echo [INFO] DEEPSEEK_API_KEY is not set. Transcription will work, but the default LiteLLM assist provider will not be ready.
+)
+
+if not defined HUGGINGFACE_API_KEY if not defined HF_TOKEN if not defined HUGGINGFACE_ACCESS_TOKEN (
+  echo [WARNING] A Hugging Face token is not set. Pyannote cannot download its gated model.
+)
+
 echo [1/2] Starting backend at http://127.0.0.1:8010
-start "Classroom Assistant Backend" cmd /c call "%BACKEND_RUNNER%"
+start "Classroom Assistant Backend" /D "%BACKEND_DIR%" "%ENV_PYTHON%" -m uvicorn app.main:app --host 127.0.0.1 --port 8010
 
 echo [2/2] Starting frontend at http://127.0.0.1:5173
-start "Classroom Assistant Frontend" cmd /c call "%FRONTEND_RUNNER%"
+start "Classroom Assistant Frontend" /D "%FRONTEND_DIR%" "%ENV_PYTHON%" -m http.server 5173 --bind 127.0.0.1
 
 echo.
 echo Demo is starting in two terminal windows.
