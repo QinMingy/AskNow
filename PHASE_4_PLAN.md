@@ -62,7 +62,7 @@ Legacy synchronous transcription endpoints remain available for compatibility.
 - [x] Define a streaming session schema separate from batch task records
 - [x] Add WebSocket transport for audio chunks and server events
 - [x] Add bounded audio chunk buffers and backpressure
-- [ ] Add incremental transcript revision rules
+- [x] Add incremental transcript revision rules
 - [ ] Decide how diarization updates revise recent speaker labels
 
 ## Operational Notes

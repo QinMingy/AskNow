@@ -36,12 +36,12 @@ client
 
 ## Next Step: Phase 5B
 
-- [ ] Add a stream processing worker that consumes queued chunks
-- [ ] Extract a shared GPU scheduler for batch and stream processing
+- [x] Add a stream processing worker that consumes queued chunks
+- [x] Extract a shared GPU scheduler for batch and stream processing
 - [ ] Normalize browser audio chunks into a stable PCM format
-- [ ] Implement sliding-window incremental transcription
-- [ ] Define partial and final transcript revision events
-- [ ] Add transcript stability and finalization rules
+- [x] Implement sliding-window incremental transcription
+- [x] Define partial and final transcript revision events
+- [x] Add transcript stability and finalization rules
 
 ## Configuration
 

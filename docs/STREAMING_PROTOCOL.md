@@ -67,5 +67,27 @@ without limit. Individual binary chunks also have a configurable byte limit.
 `stop` closes the session cleanly. Closing the WebSocket without stopping
 leaves the session available for reconnection.
 
-Phase 5A stores chunks only in memory. It does not yet run Whisper or emit
-transcript events.
+Phase 5A established transport and buffering. Phase 5B adds the optional
+processor and transcript events described below.
+
+## Phase 5B processing events
+
+When a stream processor is configured, the server consumes queued chunks in a
+background worker and pushes events without requiring client polling:
+
+```json
+{"type":"processing_status","state":"processing"}
+{"type":"buffer_status","session":{"queued_ms":0,"processed_ms":2000}}
+{"type":"transcript_partial","revision":1,"segments":[]}
+{"type":"transcript_final","revision":2,"segments":[]}
+{"type":"processing_error","detail":"..."}
+```
+
+Partial segments may be replaced by later revisions. Final segments are stable
+and must not be rewritten by clients. A segment becomes final when it is older
+than the configured finalization delay or remains unchanged across the
+configured number of revisions.
+
+For WebSocket clients, `stop` waits for the active processing window before
+emitting `session_stopped`, up to the configured stop timeout. This allows the
+final transcript event to arrive before the socket closes.

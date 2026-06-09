@@ -22,6 +22,7 @@ from .config import Settings, get_settings
 from .assistant import AssistProviderFactory, UnderstandingAssistant
 from .diarization import create_diarizer
 from .logging_config import configure_logging, request_id_var
+from .gpu import GpuScheduler
 from .provider_status import get_assist_provider_status
 from .schemas import (
     AssistProviderStatus,
@@ -38,6 +39,7 @@ from .schemas import (
 )
 from .sources import SourceRegistry, create_default_registry
 from .streaming import StreamSessionManager, handle_stream_websocket
+from .stream_processing import WhisperStreamProcessor
 from .tasks import TaskManager
 from .transcriber import WhisperTranscriber
 
@@ -58,7 +60,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Classroom Comprehension Assistant API",
-    version="0.5.0",
+    version="0.6.0",
     lifespan=lifespan,
 )
 
@@ -151,18 +153,38 @@ def get_task_manager() -> TaskManager:
         worker_count=settings.task_worker_count,
         gpu_concurrency=settings.gpu_task_concurrency,
         retention_seconds=settings.task_retention_seconds,
+        gpu_scheduler=get_gpu_scheduler(),
     )
+
+
+@lru_cache
+def get_gpu_scheduler() -> GpuScheduler:
+    return GpuScheduler(get_settings().gpu_task_concurrency)
 
 
 @lru_cache
 def get_stream_session_manager() -> StreamSessionManager:
     settings = get_settings()
+    processor_name = settings.stream_processor.strip().lower()
+    if processor_name == "whisper":
+        processor = WhisperStreamProcessor(get_transcriber())
+    elif processor_name in {"none", "disabled", "off"}:
+        processor = None
+    else:
+        raise ValueError(f"Unsupported stream processor: {settings.stream_processor}")
     return StreamSessionManager(
         max_buffer_ms=settings.stream_buffer_max_ms,
         max_chunk_bytes=settings.stream_chunk_max_bytes,
         warning_ms=settings.stream_backpressure_warning_ms,
         degraded_ms=settings.stream_backpressure_degraded_ms,
         retention_seconds=settings.stream_session_retention_seconds,
+        processor=processor,
+        gpu_scheduler=get_gpu_scheduler(),
+        window_ms=settings.stream_window_ms,
+        finalize_delay_ms=settings.stream_finalize_delay_ms,
+        stable_revisions=settings.stream_stable_revisions,
+        worker_count=settings.stream_worker_count,
+        stop_timeout_seconds=settings.stream_stop_timeout_seconds,
     )
 
 

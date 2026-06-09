@@ -1,9 +1,16 @@
+import time
+
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.main import app, get_stream_session_manager
-from app.schemas import StreamSessionCreateRequest
+from app.schemas import StreamSessionCreateRequest, TranscriptSegment
+from app.stream_processing import (
+    ProcessingAudioChunk,
+    TranscriptRevisionTracker,
+    WhisperStreamProcessor,
+)
 from app.streaming import StreamSessionManager
 
 
@@ -220,3 +227,201 @@ def test_stream_websocket_reports_full_backpressure():
             assert pressure["level"] == "full"
     finally:
         app.dependency_overrides.clear()
+
+
+def test_revision_tracker_promotes_stable_partial_to_final():
+    tracker = TranscriptRevisionTracker(finalize_delay_ms=8000, stable_revisions=2)
+    segments = [
+        TranscriptSegment(id=1, start=0.0, end=1.0, speaker="Unknown", text="稳定字幕")
+    ]
+
+    first_final, first_partial = tracker.update(
+        segments,
+        window_start_ms=0,
+        audio_end_ms=1000,
+    )
+    second_final, second_partial = tracker.update(
+        segments,
+        window_start_ms=0,
+        audio_end_ms=2000,
+    )
+
+    assert not first_final
+    assert first_partial[0].final is False
+    assert second_final[0].final is True
+    assert not second_partial
+
+
+def test_revision_tracker_finalizes_old_segments_by_time():
+    tracker = TranscriptRevisionTracker(finalize_delay_ms=3000, stable_revisions=9)
+
+    finalized, partial = tracker.update(
+        [TranscriptSegment(id=1, start=0.0, end=1.0, speaker="Unknown", text="较早字幕")],
+        window_start_ms=0,
+        audio_end_ms=5000,
+    )
+
+    assert finalized[0].final is True
+    assert not partial
+
+
+def test_stream_worker_consumes_chunks_and_publishes_transcript_events():
+    class FakeProcessor:
+        def process(self, chunks, *, mime_type, window_start_ms):
+            return [
+                TranscriptSegment(
+                    id=1,
+                    start=0.0,
+                    end=sum(chunk.duration_ms for chunk in chunks) / 1000,
+                    speaker="Unknown",
+                    text="流式测试字幕",
+                )
+            ]
+
+    manager = StreamSessionManager(
+        processor=FakeProcessor(),
+        finalize_delay_ms=8000,
+        stable_revisions=2,
+    )
+    created = create_session(manager)
+    manager.add_chunk(
+        created.session_id,
+        sequence=1,
+        duration_ms=1000,
+        payload=b"audio",
+    )
+
+    deadline = time.time() + 2
+    events = []
+    while time.time() < deadline:
+        event = manager.wait_for_event(created.session_id, timeout=0.1)
+        if event:
+            events.append(event)
+        if any(event["type"] == "transcript_partial" for event in events):
+            break
+
+    status = manager.get_status(created.session_id)
+    partial = next(event for event in events if event["type"] == "transcript_partial")
+
+    assert status.processed_chunks == 1
+    assert status.queued_ms == 0
+    assert partial["segments"][0]["text"] == "流式测试字幕"
+    assert partial["segments"][0]["final"] is False
+    manager.shutdown()
+
+
+def test_stream_websocket_pushes_incremental_transcript_without_client_polling():
+    class FakeProcessor:
+        def process(self, chunks, *, mime_type, window_start_ms):
+            return [
+                TranscriptSegment(
+                    id=1,
+                    start=0.0,
+                    end=1.0,
+                    speaker="Unknown",
+                    text="主动推送字幕",
+                )
+            ]
+
+    manager = StreamSessionManager(processor=FakeProcessor())
+    created = create_session(manager)
+    app.dependency_overrides[get_stream_session_manager] = lambda: manager
+    client = TestClient(app)
+
+    try:
+        with client.websocket_connect(created.websocket_url) as websocket:
+            websocket.receive_json()
+            websocket.send_json({"type": "audio_chunk", "sequence": 1, "duration_ms": 1000})
+            websocket.send_bytes(b"audio")
+
+            events = []
+            for _ in range(8):
+                event = websocket.receive_json()
+                events.append(event)
+                if event["type"] == "transcript_partial":
+                    break
+    finally:
+        app.dependency_overrides.clear()
+        manager.shutdown()
+
+    transcript = next(event for event in events if event["type"] == "transcript_partial")
+    assert transcript["segments"][0]["text"] == "主动推送字幕"
+
+
+def test_websocket_stop_waits_for_final_transcript_before_closing():
+    class FakeProcessor:
+        def process(self, chunks, *, mime_type, window_start_ms):
+            time.sleep(0.05)
+            return [
+                TranscriptSegment(
+                    id=1,
+                    start=0.0,
+                    end=1.0,
+                    speaker="Unknown",
+                    text="停止前最终字幕",
+                )
+            ]
+
+    manager = StreamSessionManager(processor=FakeProcessor(), stop_timeout_seconds=2)
+    created = create_session(manager)
+    app.dependency_overrides[get_stream_session_manager] = lambda: manager
+    client = TestClient(app)
+
+    try:
+        with client.websocket_connect(created.websocket_url) as websocket:
+            websocket.receive_json()
+            websocket.send_json({"type": "audio_chunk", "sequence": 1, "duration_ms": 1000})
+            websocket.send_bytes(b"audio")
+            websocket.send_json({"type": "stop"})
+
+            events = []
+            while True:
+                event = websocket.receive_json()
+                events.append(event)
+                if event["type"] == "session_stopped":
+                    break
+    finally:
+        app.dependency_overrides.clear()
+        manager.shutdown()
+
+    event_types = [event["type"] for event in events]
+    assert "transcript_final" in event_types
+    assert event_types.index("transcript_final") < event_types.index("session_stopped")
+
+
+def test_whisper_stream_processor_writes_encoded_window_to_temporary_file():
+    seen = {}
+
+    class FakeTranscriber:
+        def transcribe_stream_path(self, path):
+            seen["suffix"] = path.suffix
+            seen["payload"] = path.read_bytes()
+            return []
+
+    processor = WhisperStreamProcessor(FakeTranscriber())
+    processor.process(
+        [
+            ProcessingAudioChunk(sequence=1, duration_ms=1000, payload=b"first"),
+            ProcessingAudioChunk(sequence=2, duration_ms=1000, payload=b"second"),
+        ],
+        mime_type="audio/webm;codecs=opus",
+        window_start_ms=0,
+    )
+
+    assert seen == {"suffix": ".webm", "payload": b"firstsecond"}
+
+
+def test_stream_event_queue_discards_oldest_event_when_full():
+    manager = StreamSessionManager()
+    created = create_session(manager)
+    session = manager._get(created.session_id)
+
+    for index in range(105):
+        manager._publish(session, "test_event", index=index)
+
+    events = []
+    while event := manager.wait_for_event(created.session_id, timeout=0.01):
+        events.append(event)
+
+    assert len(events) == 100
+    assert events[0]["index"] == 5

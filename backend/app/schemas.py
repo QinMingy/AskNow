@@ -103,6 +103,21 @@ class StreamSessionStatusResponse(BaseModel):
     updated_at: datetime
     connected_at: datetime | None = None
     stopped_at: datetime | None = None
+    processed_chunks: int = 0
+    processed_ms: int = 0
+    revision: int = 0
+    final_segments: int = 0
+    partial_segments: int = 0
+
+
+class IncrementalTranscriptSegment(BaseModel):
+    id: str
+    start: float
+    end: float
+    speaker: str = "Unknown"
+    text: str
+    revision: int
+    final: bool
 
 
 AssistAction = Literal[

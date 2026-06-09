@@ -1,5 +1,5 @@
 const API_BASE_URL = "http://127.0.0.1:8010";
-const REQUIRED_API_VERSION = "0.5.0";
+const REQUIRED_API_VERSION = "0.6.0";
 const acceptedExtensions = [".mp3", ".wav", ".m4a", ".mp4"];
 const assistActionLabels = {
   explain: "解释刚刚发生了什么",

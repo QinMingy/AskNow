@@ -18,6 +18,7 @@ from .schemas import (
     TaskStatusResponse,
     TranscriptionResponse,
 )
+from .gpu import GpuScheduler
 from .sources.registry import SourceRegistry
 from .transcriber import TranscriptionCancelled, WhisperTranscriber
 
@@ -65,12 +66,13 @@ class TaskManager:
         worker_count: int = 4,
         gpu_concurrency: int = 1,
         retention_seconds: int = 3600,
+        gpu_scheduler: GpuScheduler | None = None,
     ):
         self._executor = ThreadPoolExecutor(
             max_workers=max(1, worker_count),
             thread_name_prefix="transcription-task",
         )
-        self._gpu_slots = threading.Semaphore(max(1, gpu_concurrency))
+        self._gpu_scheduler = gpu_scheduler or GpuScheduler(gpu_concurrency)
         self._retention = timedelta(seconds=max(60, retention_seconds))
         self._tasks: dict[str, TaskRecord] = {}
         self._lock = threading.RLock()
@@ -249,7 +251,7 @@ class TaskManager:
         try:
             self._raise_if_cancelled(task_id)
             self._update(task_id, "waiting_for_gpu", 20, "Waiting for GPU slot")
-            with self._gpu_slots:
+            with self._gpu_scheduler.acquire():
                 self._raise_if_cancelled(task_id)
                 response = transcriber.transcribe_path(
                     source_path,

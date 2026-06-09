@@ -223,4 +223,25 @@ class WhisperTranscriber:
             segments=segments,
         )
 
+    def transcribe_stream_path(self, audio_path: Path) -> list[TranscriptSegment]:
+        model = self._load_model()
+        segments_iter, _ = model.transcribe(
+            str(audio_path),
+            language="zh",
+            vad_filter=True,
+            beam_size=1,
+            condition_on_previous_text=False,
+        )
+        return [
+            TranscriptSegment(
+                id=index,
+                start=round(float(segment.start), 2),
+                end=round(float(segment.end), 2),
+                speaker="Unknown",
+                text=segment.text.strip(),
+            )
+            for index, segment in enumerate(segments_iter, start=1)
+            if segment.text.strip()
+        ]
+
     _transcribe_path = transcribe_path

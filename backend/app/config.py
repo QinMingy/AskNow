@@ -27,6 +27,12 @@ class Settings(BaseModel):
     stream_backpressure_warning_ms: int = 5000
     stream_backpressure_degraded_ms: int = 15000
     stream_session_retention_seconds: int = 3600
+    stream_processor: str = "whisper"
+    stream_window_ms: int = 20000
+    stream_finalize_delay_ms: int = 8000
+    stream_stable_revisions: int = 2
+    stream_worker_count: int = 2
+    stream_stop_timeout_seconds: float = 30.0
     ytdlp_cookies_file: str | None = None
     ytdlp_user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -74,6 +80,12 @@ def get_settings() -> Settings:
         stream_session_retention_seconds=int(
             os.getenv("STREAM_SESSION_RETENTION_SECONDS", "3600")
         ),
+        stream_processor=os.getenv("STREAM_PROCESSOR", "whisper"),
+        stream_window_ms=int(os.getenv("STREAM_WINDOW_MS", "20000")),
+        stream_finalize_delay_ms=int(os.getenv("STREAM_FINALIZE_DELAY_MS", "8000")),
+        stream_stable_revisions=int(os.getenv("STREAM_STABLE_REVISIONS", "2")),
+        stream_worker_count=int(os.getenv("STREAM_WORKER_COUNT", "2")),
+        stream_stop_timeout_seconds=float(os.getenv("STREAM_STOP_TIMEOUT_SECONDS", "30")),
         ytdlp_cookies_file=os.getenv("YTDLP_COOKIES_FILE"),
         ytdlp_user_agent=os.getenv(
             "YTDLP_USER_AGENT",

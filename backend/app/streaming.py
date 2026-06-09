@@ -1,8 +1,12 @@
+import asyncio
 import json
 import logging
+import queue
 import threading
+import time
 import uuid
 from collections import deque
+from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
@@ -14,6 +18,12 @@ from .schemas import (
     StreamSessionCreatedResponse,
     StreamSessionState,
     StreamSessionStatusResponse,
+)
+from .gpu import GpuScheduler
+from .stream_processing import (
+    ProcessingAudioChunk,
+    StreamProcessor,
+    TranscriptRevisionTracker,
 )
 
 logger = logging.getLogger(__name__)
@@ -45,6 +55,14 @@ class StreamSession:
     received_ms: int = 0
     dropped_chunks: int = 0
     last_sequence: int | None = None
+    processed_chunks: int = 0
+    processed_ms: int = 0
+    history: deque[AudioChunk] = field(default_factory=deque)
+    history_ms: int = 0
+    events: queue.Queue = field(default_factory=lambda: queue.Queue(maxsize=100))
+    wake_worker: threading.Event = field(default_factory=threading.Event)
+    worker_future: Future | None = None
+    transcript: TranscriptRevisionTracker | None = None
     created_at: datetime = field(default_factory=utc_now)
     updated_at: datetime = field(default_factory=utc_now)
     connected_at: datetime | None = None
@@ -60,6 +78,13 @@ class StreamSessionManager:
         warning_ms: int = 5000,
         degraded_ms: int = 15000,
         retention_seconds: int = 3600,
+        processor: StreamProcessor | None = None,
+        gpu_scheduler: GpuScheduler | None = None,
+        window_ms: int = 20000,
+        finalize_delay_ms: int = 8000,
+        stable_revisions: int = 2,
+        worker_count: int = 2,
+        stop_timeout_seconds: float = 30.0,
     ):
         self.max_buffer_ms = max(1000, max_buffer_ms)
         self.max_chunk_bytes = max(1, max_chunk_bytes)
@@ -69,6 +94,16 @@ class StreamSessionManager:
             min(degraded_ms, self.max_buffer_ms),
         )
         self.retention = timedelta(seconds=max(60, retention_seconds))
+        self.processor = processor
+        self.gpu_scheduler = gpu_scheduler or GpuScheduler(1)
+        self.window_ms = max(1000, window_ms)
+        self.finalize_delay_ms = max(0, finalize_delay_ms)
+        self.stable_revisions = max(1, stable_revisions)
+        self.stop_timeout_seconds = max(0.1, stop_timeout_seconds)
+        self._executor = ThreadPoolExecutor(
+            max_workers=max(1, worker_count),
+            thread_name_prefix="stream-processor",
+        )
         self._sessions: dict[str, StreamSession] = {}
         self._lock = threading.RLock()
 
@@ -91,9 +126,18 @@ class StreamSessionManager:
             sample_rate=request.sample_rate,
             channels=request.channels,
             chunk_duration_ms=request.chunk_duration_ms,
+            transcript=TranscriptRevisionTracker(
+                finalize_delay_ms=self.finalize_delay_ms,
+                stable_revisions=self.stable_revisions,
+            ),
         )
         with self._lock:
             self._sessions[session.session_id] = session
+            if self.processor is not None:
+                session.worker_future = self._executor.submit(
+                    self._run_worker,
+                    session.session_id,
+                )
         logger.info(
             "stream.session.created session_id=%s mime_type=%s sample_rate=%s channels=%s",
             session.session_id,
@@ -176,6 +220,7 @@ class StreamSessionManager:
             session.last_sequence = sequence
             session.state = "active"
             session.updated_at = utc_now()
+            session.wake_worker.set()
             response = self._status(session)
         logger.info(
             "stream.chunk.accepted session_id=%s sequence=%s duration_ms=%s queued_ms=%s",
@@ -197,10 +242,24 @@ class StreamSessionManager:
             return chunk
 
     def stop(self, session_id: str) -> StreamSessionStatusResponse:
-        return self._close(session_id, "stopped")
+        return self._close(session_id, "stopped", finalize=True)
 
     def cancel(self, session_id: str) -> StreamSessionStatusResponse:
-        return self._close(session_id, "cancelled")
+        return self._close(session_id, "cancelled", finalize=False)
+
+    def stop_and_wait(self, session_id: str) -> StreamSessionStatusResponse:
+        status_response = self.stop(session_id)
+        session = self._get(session_id)
+        if session.worker_future is not None:
+            try:
+                session.worker_future.result(timeout=self.stop_timeout_seconds)
+            except FutureTimeoutError:
+                logger.warning(
+                    "stream.session.stop_timeout session_id=%s timeout_seconds=%s",
+                    session_id,
+                    self.stop_timeout_seconds,
+                )
+        return self.get_status(session_id) if status_response.state == "stopped" else status_response
 
     def get_status(self, session_id: str) -> StreamSessionStatusResponse:
         session = self._get(session_id)
@@ -212,16 +271,46 @@ class StreamSessionManager:
             for session in self._sessions.values():
                 if session.state not in {"stopped", "cancelled"}:
                     self._mark_closed(session, "cancelled")
+                    session.wake_worker.set()
+        self._executor.shutdown(wait=False, cancel_futures=True)
+
+    def wait_for_event(self, session_id: str, timeout: float = 0.5) -> dict | None:
+        session = self._get(session_id)
+        try:
+            return session.events.get(timeout=timeout)
+        except queue.Empty:
+            return None
+
+    def acknowledge_event(self, session_id: str) -> None:
+        self._get(session_id).events.task_done()
+
+    def wait_for_events_sent(self, session_id: str) -> None:
+        session = self._get(session_id)
+        deadline = time.monotonic() + self.stop_timeout_seconds
+        while session.events.unfinished_tasks and time.monotonic() < deadline:
+            time.sleep(0.01)
 
     def _close(
         self,
         session_id: str,
         state: StreamSessionState,
+        *,
+        finalize: bool,
     ) -> StreamSessionStatusResponse:
         session = self._get(session_id)
         with self._lock:
             if session.state not in {"stopped", "cancelled"}:
+                if finalize and session.transcript is not None:
+                    finalized = session.transcript.finalize_all()
+                    if finalized:
+                        self._publish(
+                            session,
+                            "transcript_final",
+                            revision=session.transcript.revision,
+                            segments=[item.model_dump(mode="json") for item in finalized],
+                        )
                 self._mark_closed(session, state)
+                session.wake_worker.set()
             response = self._status(session)
         logger.info("stream.session.%s session_id=%s", response.state, session_id)
         return response
@@ -259,6 +348,11 @@ class StreamSessionManager:
             updated_at=session.updated_at,
             connected_at=session.connected_at,
             stopped_at=session.stopped_at,
+            processed_chunks=session.processed_chunks,
+            processed_ms=session.processed_ms,
+            revision=session.transcript.revision if session.transcript else 0,
+            final_segments=len(session.transcript.final_segments) if session.transcript else 0,
+            partial_segments=len(session.transcript.partial_segments) if session.transcript else 0,
         )
 
     def _backpressure(self, queued_ms: int) -> BackpressureLevel:
@@ -281,6 +375,105 @@ class StreamSessionManager:
             for session_id in expired:
                 del self._sessions[session_id]
 
+    def _run_worker(self, session_id: str) -> None:
+        session = self._get(session_id)
+        while True:
+            session.wake_worker.wait(timeout=0.5)
+            session.wake_worker.clear()
+            try:
+                consumed = self._consume_available(session)
+                if consumed:
+                    self._publish(
+                        session,
+                        "buffer_status",
+                        session=self.get_status(session.session_id).model_dump(mode="json"),
+                    )
+                    self._process_window(session)
+            except Exception as exc:
+                logger.exception("stream.worker.failed session_id=%s", session_id)
+                self._publish(session, "processing_error", detail=str(exc))
+            with self._lock:
+                if session.state in {"stopped", "cancelled"} and not session.chunks:
+                    return
+
+    def _consume_available(self, session: StreamSession) -> list[AudioChunk]:
+        consumed = []
+        with self._lock:
+            while session.chunks:
+                chunk = session.chunks.popleft()
+                consumed.append(chunk)
+                session.queued_ms = max(0, session.queued_ms - chunk.duration_ms)
+                session.processed_chunks += 1
+                session.processed_ms += chunk.duration_ms
+                session.history.append(chunk)
+                session.history_ms += chunk.duration_ms
+            while session.history and session.history_ms > self.window_ms:
+                removed = session.history.popleft()
+                session.history_ms -= removed.duration_ms
+            session.updated_at = utc_now()
+        return consumed
+
+    def _process_window(self, session: StreamSession) -> None:
+        if self.processor is None or session.transcript is None:
+            return
+        chunks = [
+            ProcessingAudioChunk(chunk.sequence, chunk.duration_ms, chunk.payload)
+            for chunk in session.history
+        ]
+        window_start_ms = max(0, session.processed_ms - session.history_ms)
+        self._publish(session, "processing_status", state="processing")
+        try:
+            with self.gpu_scheduler.acquire():
+                segments = self.processor.process(
+                    chunks,
+                    mime_type=session.mime_type,
+                    window_start_ms=window_start_ms,
+                )
+            newly_final, partial = session.transcript.update(
+                segments,
+                window_start_ms=window_start_ms,
+                audio_end_ms=session.processed_ms,
+            )
+            with self._lock:
+                stopped = session.state == "stopped"
+                cancelled = session.state == "cancelled"
+            if cancelled:
+                return
+            if stopped:
+                newly_final.extend(session.transcript.finalize_all())
+                partial = []
+            if newly_final:
+                self._publish(
+                    session,
+                    "transcript_final",
+                    revision=session.transcript.revision,
+                    segments=[item.model_dump(mode="json") for item in newly_final],
+                )
+            self._publish(
+                session,
+                "transcript_partial",
+                revision=session.transcript.revision,
+                segments=[item.model_dump(mode="json") for item in partial],
+            )
+        except Exception as exc:
+            logger.exception("stream.processing.failed session_id=%s", session.session_id)
+            self._publish(session, "processing_error", detail=str(exc))
+        finally:
+            self._publish(session, "processing_status", state="idle")
+
+    @staticmethod
+    def _publish(record: StreamSession, event_type: str, **payload) -> None:
+        event = {"type": event_type, **payload}
+        try:
+            record.events.put_nowait(event)
+        except queue.Full:
+            try:
+                record.events.get_nowait()
+                record.events.task_done()
+            except queue.Empty:
+                pass
+            record.events.put_nowait(event)
+
 
 async def handle_stream_websocket(
     websocket: WebSocket,
@@ -301,6 +494,7 @@ async def handle_stream_websocket(
         }
     )
     pending_chunk: dict | None = None
+    event_task = asyncio.create_task(_pump_stream_events(websocket, session_id, manager))
 
     try:
         while True:
@@ -333,6 +527,7 @@ async def handle_stream_websocket(
     except WebSocketDisconnect:
         pass
     finally:
+        event_task.cancel()
         manager.disconnect(session_id)
 
 
@@ -429,7 +624,8 @@ async def _handle_control_event(
         await websocket.send_json({"type": "pong"})
         return pending_chunk, False
     if event_type == "stop":
-        stopped = manager.stop(session_id)
+        stopped = await asyncio.to_thread(manager.stop_and_wait, session_id)
+        await asyncio.to_thread(manager.wait_for_events_sent, session_id)
         await websocket.send_json(
             {
                 "type": "session_stopped",
@@ -449,3 +645,17 @@ async def _handle_control_event(
 
 async def _send_stream_error(websocket: WebSocket, code: str, detail: str) -> None:
     await websocket.send_json({"type": "error", "code": code, "detail": detail})
+
+
+async def _pump_stream_events(
+    websocket: WebSocket,
+    session_id: str,
+    manager: StreamSessionManager,
+) -> None:
+    while True:
+        event = await asyncio.to_thread(manager.wait_for_event, session_id, 0.5)
+        if event is not None:
+            try:
+                await websocket.send_json(event)
+            finally:
+                manager.acknowledge_event(session_id)
