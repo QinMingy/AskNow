@@ -1,9 +1,13 @@
+import logging
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import HTTPException, status
 
 from .base import ResolvedMedia
+
+logger = logging.getLogger(__name__)
 
 
 class YtDlpSourceResolver:
@@ -46,10 +50,17 @@ class YtDlpSourceResolver:
 
         before = {path.resolve() for path in output_dir.iterdir() if path.is_file()}
 
+        started = time.perf_counter()
+        logger.info(
+            "yt_dlp.download.start host=%s auth_mode=%s",
+            urlparse(url).netloc.lower(),
+            browser or ("cookies_file" if self.cookies_file else "anonymous"),
+        )
         try:
             with YoutubeDL(options) as ydl:
                 info = ydl.extract_info(url, download=True)
         except Exception as exc:
+            logger.exception("yt_dlp.download.failed host=%s", urlparse(url).netloc.lower())
             auth_mode = f"browser login: {browser}" if browser else "anonymous download"
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
@@ -78,6 +89,13 @@ class YtDlpSourceResolver:
                 detail="Video download finished, but no local media file was found.",
             )
 
+        logger.info(
+            "yt_dlp.download.complete provider=%s extension=%s bytes=%s elapsed_ms=%.1f",
+            str(info.get("extractor_key") or self.provider),
+            media_path.suffix.lower(),
+            media_path.stat().st_size,
+            (time.perf_counter() - started) * 1000,
+        )
         return ResolvedMedia(
             provider=str(info.get("extractor_key") or self.provider),
             title=info.get("title"),

@@ -54,6 +54,15 @@ def test_health():
     assert response.json()["diarization_provider"] == "pyannote"
     assert response.json()["assist_provider"] == "litellm"
     assert "chrome" in response.json()["browser_cookie_sources"]
+    assert response.headers["X-Request-ID"]
+
+
+def test_request_id_header_is_preserved():
+    client = TestClient(app)
+
+    response = client.get("/health", headers={"X-Request-ID": "test-request"})
+
+    assert response.headers["X-Request-ID"] == "test-request"
 
 
 def test_transcribe_returns_unified_schema(tmp_path: Path):

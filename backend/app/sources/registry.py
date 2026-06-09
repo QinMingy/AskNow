@@ -1,9 +1,12 @@
+import logging
 from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import HTTPException, status
 
 from .base import ResolvedMedia, SourceResolver
+
+logger = logging.getLogger(__name__)
 
 
 class SourceRegistry:
@@ -23,6 +26,12 @@ class SourceRegistry:
 
         for resolver in self._resolvers:
             if resolver.supports(url):
+                logger.info(
+                    "source.selected provider=%s host=%s browser=%s",
+                    resolver.provider,
+                    parsed.netloc.lower(),
+                    browser or "anonymous",
+                )
                 return resolver.resolve(url, output_dir, browser=browser)
 
         supported = ", ".join(resolver.provider for resolver in self._resolvers)

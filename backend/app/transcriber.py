@@ -1,3 +1,5 @@
+import logging
+import time
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 
@@ -7,6 +9,8 @@ from .config import Settings
 from .diarization import Diarizer
 from .schemas import SourceMetadata, TranscriptSegment, TranscriptionResponse
 from .sources.registry import SourceRegistry
+
+logger = logging.getLogger(__name__)
 
 
 class WhisperTranscriber:
@@ -19,6 +23,13 @@ class WhisperTranscriber:
         if self._model is not None:
             return self._model
 
+        started = time.perf_counter()
+        logger.info(
+            "whisper.model_load.start model=%s device=%s compute_type=%s",
+            self.settings.whisper_model,
+            self.settings.whisper_device,
+            self.settings.whisper_compute_type,
+        )
         try:
             from faster_whisper import WhisperModel
         except ImportError as exc:
@@ -38,6 +49,7 @@ class WhisperTranscriber:
                 compute_type=self.settings.whisper_compute_type,
             )
         except Exception as exc:
+            logger.exception("whisper.model_load.failed model=%s", self.settings.whisper_model)
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=(
@@ -47,6 +59,11 @@ class WhisperTranscriber:
                 ),
             ) from exc
 
+        logger.info(
+            "whisper.model_load.complete model=%s elapsed_ms=%.1f",
+            self.settings.whisper_model,
+            (time.perf_counter() - started) * 1000,
+        )
         return self._model
 
     async def transcribe_upload(self, file: UploadFile) -> TranscriptionResponse:
@@ -60,10 +77,17 @@ class WhisperTranscriber:
 
         with NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             tmp_path = Path(tmp.name)
+            uploaded_bytes = 0
             while chunk := await file.read(1024 * 1024):
                 tmp.write(chunk)
+                uploaded_bytes += len(chunk)
 
         try:
+            logger.info(
+                "upload.ready extension=%s bytes=%s",
+                suffix,
+                uploaded_bytes,
+            )
             return self._transcribe_path(tmp_path)
         finally:
             tmp_path.unlink(missing_ok=True)
@@ -76,7 +100,14 @@ class WhisperTranscriber:
         browser: str | None = None,
     ) -> TranscriptionResponse:
         with TemporaryDirectory() as tmpdir:
+            logger.info("video.resolve.start browser=%s", browser or "anonymous")
             media = source_registry.resolve(url, Path(tmpdir), browser=browser)
+            logger.info(
+                "video.resolve.complete provider=%s extension=%s bytes=%s",
+                media.provider,
+                media.media_path.suffix.lower(),
+                media.media_path.stat().st_size,
+            )
             response = self._transcribe_path(media.media_path)
             response.source = SourceMetadata(
                 provider=media.provider,
@@ -88,6 +119,13 @@ class WhisperTranscriber:
     def _transcribe_path(self, audio_path: Path) -> TranscriptionResponse:
         model = self._load_model()
 
+        started = time.perf_counter()
+        logger.info(
+            "whisper.inference.start model=%s extension=%s bytes=%s",
+            self.settings.whisper_model,
+            audio_path.suffix.lower(),
+            audio_path.stat().st_size,
+        )
         try:
             segments_iter, info = model.transcribe(
                 str(audio_path),
@@ -106,10 +144,30 @@ class WhisperTranscriber:
                         text=segment.text.strip(),
                     )
                 )
+            whisper_elapsed_ms = (time.perf_counter() - started) * 1000
+            logger.info(
+                "whisper.inference.complete segments=%s elapsed_ms=%.1f",
+                len(segments),
+                whisper_elapsed_ms,
+            )
+            diarization_started = time.perf_counter()
+            logger.info(
+                "diarization.start provider=%s segments=%s",
+                self.diarizer.name,
+                len(segments),
+            )
             segments = self.diarizer.assign_speakers(audio_path, segments)
+            logger.info(
+                "diarization.complete provider=%s speakers=%s elapsed_ms=%.1f",
+                self.diarizer.name,
+                len({segment.speaker for segment in segments}),
+                (time.perf_counter() - diarization_started) * 1000,
+            )
         except HTTPException:
+            logger.exception("transcription.pipeline.failed")
             raise
         except Exception as exc:
+            logger.exception("transcription.pipeline.failed")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Transcription failed: {exc}",
@@ -117,6 +175,12 @@ class WhisperTranscriber:
 
         duration = float(getattr(info, "duration", 0.0) or 0.0)
         language = str(getattr(info, "language", "zh") or "zh")
+        logger.info(
+            "transcription.pipeline.complete language=%s duration_seconds=%.2f total_elapsed_ms=%.1f",
+            language,
+            duration,
+            (time.perf_counter() - started) * 1000,
+        )
 
         return TranscriptionResponse(
             language=language,

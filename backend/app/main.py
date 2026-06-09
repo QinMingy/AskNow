@@ -1,11 +1,15 @@
+import logging
+import time
+import uuid
 from functools import lru_cache
 
-from fastapi import Depends, FastAPI, UploadFile
+from fastapi import Depends, FastAPI, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import Settings, get_settings
 from .assistant import AssistProviderFactory, UnderstandingAssistant
 from .diarization import create_diarizer
+from .logging_config import configure_logging, request_id_var
 from .provider_status import get_assist_provider_status
 from .schemas import (
     AssistProviderStatus,
@@ -17,6 +21,9 @@ from .schemas import (
 )
 from .sources import SourceRegistry, create_default_registry
 from .transcriber import WhisperTranscriber
+
+configure_logging()
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Classroom Comprehension Assistant API",
@@ -32,9 +39,47 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:8]
+    token = request_id_var.set(request_id)
+    started = time.perf_counter()
+    logger.info("request.start method=%s path=%s", request.method, request.url.path)
+    try:
+        response = await call_next(request)
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        response.headers["X-Request-ID"] = request_id
+        logger.info(
+            "request.complete method=%s path=%s status=%s elapsed_ms=%.1f",
+            request.method,
+            request.url.path,
+            response.status_code,
+            elapsed_ms,
+        )
+        return response
+    except Exception:
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        logger.exception(
+            "request.failed method=%s path=%s elapsed_ms=%.1f",
+            request.method,
+            request.url.path,
+            elapsed_ms,
+        )
+        raise
+    finally:
+        request_id_var.reset(token)
+
+
 @lru_cache
 def get_transcriber() -> WhisperTranscriber:
     settings = get_settings()
+    logger.info(
+        "transcriber.create whisper_model=%s whisper_device=%s diarization_provider=%s diarization_model=%s",
+        settings.whisper_model,
+        settings.whisper_device,
+        settings.diarization_provider,
+        settings.diarization_model,
+    )
     diarizer = create_diarizer(
         settings.diarization_provider,
         model=settings.diarization_model,
@@ -52,6 +97,11 @@ def get_source_registry() -> SourceRegistry:
 @lru_cache
 def get_understanding_assistant() -> UnderstandingAssistant:
     settings = get_settings()
+    logger.info(
+        "assistant.create provider=%s model=%s",
+        settings.assist_provider,
+        settings.assist_model or "-",
+    )
     provider = AssistProviderFactory.create(
         settings.assist_provider,
         base_url=settings.assist_base_url,

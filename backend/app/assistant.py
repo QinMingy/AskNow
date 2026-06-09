@@ -1,9 +1,13 @@
 import json
+import logging
+import time
 from typing import Protocol
 
 import httpx
 
 from .schemas import AssistRequest, AssistResponse, TranscriptSegment
+
+logger = logging.getLogger(__name__)
 
 
 class AssistProvider(Protocol):
@@ -204,33 +208,52 @@ class OpenAICompatibleAssistProvider:
         self.client = client or httpx.Client(timeout=timeout_seconds)
 
     def assist(self, request: AssistRequest) -> AssistResponse:
+        started = time.perf_counter()
+        logger.info(
+            "llm.inference.start provider=%s model=%s action=%s segments=%s",
+            self.name,
+            self.model,
+            request.action,
+            len(request.segments),
+        )
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
-        response = self.client.post(
-            f"{self.base_url}/chat/completions",
-            headers=headers,
-            json={
-                "model": self.model,
-                "temperature": 0.2,
-                "response_format": {"type": "json_object"},
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": self._system_prompt(),
-                    },
-                    {
-                        "role": "user",
-                        "content": self._user_prompt(request),
-                    },
-                ],
-            },
+        try:
+            response = self.client.post(
+                f"{self.base_url}/chat/completions",
+                headers=headers,
+                json={
+                    "model": self.model,
+                    "temperature": 0.2,
+                    "response_format": {"type": "json_object"},
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": self._system_prompt(),
+                        },
+                        {
+                            "role": "user",
+                            "content": self._user_prompt(request),
+                        },
+                    ],
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+            content = payload["choices"][0]["message"]["content"]
+            result = build_llm_assist_response(request, self.name, content)
+        except Exception:
+            logger.exception("llm.inference.failed provider=%s model=%s", self.name, self.model)
+            raise
+        logger.info(
+            "llm.inference.complete provider=%s model=%s elapsed_ms=%.1f",
+            self.name,
+            self.model,
+            (time.perf_counter() - started) * 1000,
         )
-        response.raise_for_status()
-        payload = response.json()
-        content = payload["choices"][0]["message"]["content"]
-        return build_llm_assist_response(request, self.name, content)
+        return result
 
     @staticmethod
     def _system_prompt() -> str:
@@ -282,6 +305,14 @@ class LiteLLMAssistProvider:
         self.completion_func = completion_func
 
     def assist(self, request: AssistRequest) -> AssistResponse:
+        started = time.perf_counter()
+        logger.info(
+            "llm.inference.start provider=%s model=%s action=%s segments=%s",
+            self.name,
+            self.model,
+            request.action,
+            len(request.segments),
+        )
         completion = self.completion_func or self._load_completion()
         kwargs = {
             "model": self.model,
@@ -304,9 +335,20 @@ class LiteLLMAssistProvider:
         if self.base_url:
             kwargs["api_base"] = self.base_url
 
-        response = completion(**kwargs)
-        content = extract_chat_content(response)
-        return build_llm_assist_response(request, self.name, content)
+        try:
+            response = completion(**kwargs)
+            content = extract_chat_content(response)
+            result = build_llm_assist_response(request, self.name, content)
+        except Exception:
+            logger.exception("llm.inference.failed provider=%s model=%s", self.name, self.model)
+            raise
+        logger.info(
+            "llm.inference.complete provider=%s model=%s elapsed_ms=%.1f",
+            self.name,
+            self.model,
+            (time.perf_counter() - started) * 1000,
+        )
+        return result
 
     @staticmethod
     def _load_completion():
@@ -414,4 +456,27 @@ class UnderstandingAssistant:
         self.provider = provider
 
     def assist(self, request: AssistRequest) -> AssistResponse:
-        return self.provider.assist(request)
+        started = time.perf_counter()
+        logger.info(
+            "assist.start provider=%s action=%s segments=%s window_seconds=%s",
+            self.provider.name,
+            request.action,
+            len(request.segments),
+            request.window_seconds,
+        )
+        try:
+            response = self.provider.assist(request)
+        except Exception:
+            logger.exception(
+                "assist.failed provider=%s action=%s",
+                self.provider.name,
+                request.action,
+            )
+            raise
+        logger.info(
+            "assist.complete provider=%s action=%s elapsed_ms=%.1f",
+            self.provider.name,
+            request.action,
+            (time.perf_counter() - started) * 1000,
+        )
+        return response

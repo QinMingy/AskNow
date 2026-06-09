@@ -1,8 +1,12 @@
+import logging
+import time
 from pathlib import Path
 
 from fastapi import HTTPException, status
 
 from ..schemas import TranscriptSegment
+
+logger = logging.getLogger(__name__)
 
 
 class PyannoteDiarizer:
@@ -34,6 +38,12 @@ class PyannoteDiarizer:
                 ),
             )
 
+        started = time.perf_counter()
+        logger.info(
+            "pyannote.model_load.start model=%s device=%s",
+            self.model,
+            self.device,
+        )
         try:
             import torch
             from pyannote.audio import Pipeline
@@ -50,6 +60,7 @@ class PyannoteDiarizer:
         except HTTPException:
             raise
         except Exception as exc:
+            logger.exception("pyannote.model_load.failed model=%s", self.model)
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=(
@@ -60,6 +71,11 @@ class PyannoteDiarizer:
                 ),
             ) from exc
 
+        logger.info(
+            "pyannote.model_load.complete model=%s elapsed_ms=%.1f",
+            self.model,
+            (time.perf_counter() - started) * 1000,
+        )
         return self._pipeline
 
     def assign_speakers(
@@ -70,6 +86,12 @@ class PyannoteDiarizer:
         if not segments:
             return segments
 
+        started = time.perf_counter()
+        logger.info(
+            "pyannote.inference.start model=%s segments=%s",
+            self.model,
+            len(segments),
+        )
         try:
             output = self._load_pipeline()(str(audio_path))
             diarization = getattr(output, "speaker_diarization", output)
@@ -80,6 +102,7 @@ class PyannoteDiarizer:
         except HTTPException:
             raise
         except Exception as exc:
+            logger.exception("pyannote.inference.failed model=%s", self.model)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Speaker diarization failed: {exc}",
@@ -92,6 +115,12 @@ class PyannoteDiarizer:
                 speaker_names[raw_speaker] = self._display_name(len(speaker_names))
             segment.speaker = speaker_names[raw_speaker]
 
+        logger.info(
+            "pyannote.inference.complete turns=%s speakers=%s elapsed_ms=%.1f",
+            len(turns),
+            len(speaker_names),
+            (time.perf_counter() - started) * 1000,
+        )
         return segments
 
     @staticmethod
