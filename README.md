@@ -55,6 +55,9 @@ cd C:\Users\qinmy\Documents\WhisperProject
 .\start_demo.bat
 ```
 
+启动脚本会逐项显示后端依赖加载进度和耗时。首次导入 PyTorch、FunASR
+或 pyannote.audio 可能需要较长时间，但窗口会持续显示当前正在检查的依赖。
+
 启动后会打开两个终端窗口：
 
 - 后端：`http://127.0.0.1:8010`
