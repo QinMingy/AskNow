@@ -48,9 +48,9 @@ the chosen browser codec and normalize it into a reliably decodable format.
 
 - [ ] Add browser microphone capture and device permission states
 - [ ] Verify MediaRecorder codec support
-- [ ] Normalize incoming browser audio to stable PCM/WAV windows
-- [ ] Render partial and final subtitles differently
-- [ ] Display latency and backpressure states
+- [x] Normalize incoming browser audio to stable PCM/WAV windows
+- [x] Render partial and final subtitles differently
+- [x] Display latency and backpressure states
 - [x] Define graceful stop behavior while the final GPU window is processing
 
 ## Configuration

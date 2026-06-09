@@ -1,5 +1,7 @@
 import logging
+import wave
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Protocol
@@ -38,10 +40,14 @@ class WhisperStreamProcessor:
         mime_type: str,
         window_start_ms: int,
     ) -> list[TranscriptSegment]:
-        with NamedTemporaryFile(delete=False, suffix=mime_suffix(mime_type)) as audio_file:
+        suffix = mime_suffix(mime_type)
+        with NamedTemporaryFile(delete=False, suffix=suffix) as audio_file:
             path = Path(audio_file.name)
-            for chunk in chunks:
-                audio_file.write(chunk.payload)
+            if suffix == ".wav":
+                audio_file.write(build_pcm_wav_window(chunks))
+            else:
+                for chunk in chunks:
+                    audio_file.write(chunk.payload)
         try:
             return self.transcriber.transcribe_stream_path(path)
         finally:
@@ -127,3 +133,38 @@ def mime_suffix(mime_type: str) -> str:
     if "ogg" in normalized:
         return ".ogg"
     return ".webm"
+
+
+def build_pcm_wav_window(chunks: list[ProcessingAudioChunk]) -> bytes:
+    if not chunks:
+        raise ValueError("At least one PCM WAV chunk is required.")
+
+    parameters = None
+    frames = []
+    for chunk in chunks:
+        try:
+            with wave.open(BytesIO(chunk.payload), "rb") as source:
+                current = (
+                    source.getnchannels(),
+                    source.getsampwidth(),
+                    source.getframerate(),
+                    source.getcomptype(),
+                )
+                if current[3] != "NONE":
+                    raise ValueError("Only uncompressed PCM WAV chunks are supported.")
+                if parameters is None:
+                    parameters = current
+                elif current != parameters:
+                    raise ValueError("PCM WAV chunk formats must match within a stream window.")
+                frames.append(source.readframes(source.getnframes()))
+        except wave.Error as exc:
+            raise ValueError(f"Invalid PCM WAV audio chunk: {exc}") from exc
+
+    output = BytesIO()
+    channels, sample_width, sample_rate, _ = parameters
+    with wave.open(output, "wb") as target:
+        target.setnchannels(channels)
+        target.setsampwidth(sample_width)
+        target.setframerate(sample_rate)
+        target.writeframes(b"".join(frames))
+    return output.getvalue()

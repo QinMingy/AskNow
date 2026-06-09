@@ -1,5 +1,6 @@
 const API_BASE_URL = "http://127.0.0.1:8010";
-const REQUIRED_API_VERSION = "0.6.0";
+const REQUIRED_API_VERSION = "0.7.0";
+const STREAM_CHUNK_DURATION_MS = 1000;
 const acceptedExtensions = [".mp3", ".wav", ".m4a", ".mp4"];
 const assistActionLabels = {
   explain: "解释刚刚发生了什么",
@@ -42,6 +43,19 @@ let selectedFile = null;
 let latestResult = null;
 let inputMode = "file";
 let currentTaskId = null;
+let liveSocket = null;
+let liveMediaStream = null;
+let liveAudioContext = null;
+let liveProcessorNode = null;
+let liveSourceNode = null;
+let liveSequence = 0;
+let liveStartedAt = null;
+let liveTimerHandle = null;
+let liveCanSend = true;
+let liveFinalSegments = [];
+let livePartialSegments = [];
+let liveSampleBuffers = [];
+let liveSampleCount = 0;
 
 const elements = {
   audioInput: document.querySelector("#audioInput"),
@@ -59,6 +73,15 @@ const elements = {
   focusSummary: document.querySelector("#focusSummary"),
   focusTitle: document.querySelector("#focusTitle"),
   noticeMessage: document.querySelector("#noticeMessage"),
+  liveBackpressure: document.querySelector("#liveBackpressure"),
+  liveHint: document.querySelector("#liveHint"),
+  liveModeButton: document.querySelector("#liveModeButton"),
+  liveProcessing: document.querySelector("#liveProcessing"),
+  livePulse: document.querySelector("#livePulse"),
+  liveRevision: document.querySelector("#liveRevision"),
+  liveStatus: document.querySelector("#liveStatus"),
+  liveTimer: document.querySelector("#liveTimer"),
+  liveZone: document.querySelector("#liveZone"),
   pickFileButton: document.querySelector("#pickFileButton"),
   providerStatus: document.querySelector("#providerStatus"),
   progressBar: document.querySelector("#progressBar"),
@@ -66,6 +89,8 @@ const elements = {
   progressPercent: document.querySelector("#progressPercent"),
   statusDot: document.querySelector("#statusDot"),
   statusText: document.querySelector("#statusText"),
+  startLiveButton: document.querySelector("#startLiveButton"),
+  stopLiveButton: document.querySelector("#stopLiveButton"),
   taskProgress: document.querySelector("#taskProgress"),
   transcribeButton: document.querySelector("#transcribeButton"),
   transcriptList: document.querySelector("#transcriptList"),
@@ -90,11 +115,12 @@ function setState(state) {
     transcribing: "正在转写",
     complete: "转写完成",
     error: "转写失败",
+    live: "实时字幕中",
   };
 
   elements.statusText.textContent = labels[state] || labels.idle;
   elements.statusDot.className = `status-dot status-${state}`;
-  const isBusy = state === "uploading" || state === "transcribing";
+  const isBusy = state === "uploading" || state === "transcribing" || state === "live";
   elements.transcribeButton.disabled = isBusy;
   elements.urlTranscribeButton.disabled = isBusy;
 
@@ -108,6 +134,67 @@ function setState(state) {
     elements.transcribeButton.textContent = "选择音频";
     elements.urlTranscribeButton.textContent = "解析并转写";
   }
+}
+
+function websocketUrl(path) {
+  return `${API_BASE_URL.replace(/^http/, "ws")}${path}`;
+}
+
+function encodePcmWav(samples, sampleRate) {
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
+  const writeText = (offset, text) => {
+    for (let index = 0; index < text.length; index += 1) view.setUint8(offset + index, text.charCodeAt(index));
+  };
+  writeText(0, "RIFF");
+  view.setUint32(4, 36 + samples.length * 2, true);
+  writeText(8, "WAVE");
+  writeText(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeText(36, "data");
+  view.setUint32(40, samples.length * 2, true);
+  samples.forEach((sample, index) => {
+    const clipped = Math.max(-1, Math.min(1, sample));
+    view.setInt16(44 + index * 2, clipped < 0 ? clipped * 32768 : clipped * 32767, true);
+  });
+  return buffer;
+}
+
+function collectLiveSamples(samples) {
+  liveSampleBuffers.push(new Float32Array(samples));
+  liveSampleCount += samples.length;
+  const targetSamples = Math.round(liveAudioContext.sampleRate * STREAM_CHUNK_DURATION_MS / 1000);
+  while (liveSampleCount >= targetSamples) {
+    const chunk = new Float32Array(targetSamples);
+    let written = 0;
+    while (written < targetSamples) {
+      const current = liveSampleBuffers[0];
+      const take = Math.min(current.length, targetSamples - written);
+      chunk.set(current.subarray(0, take), written);
+      written += take;
+      if (take === current.length) liveSampleBuffers.shift();
+      else liveSampleBuffers[0] = current.subarray(take);
+      liveSampleCount -= take;
+    }
+    sendLiveAudioChunk(chunk);
+  }
+}
+
+function sendLiveAudioChunk(samples, durationMs = STREAM_CHUNK_DURATION_MS) {
+  if (!liveCanSend || !liveSocket || liveSocket.readyState !== WebSocket.OPEN) return;
+  liveSequence += 1;
+  liveSocket.send(JSON.stringify({
+    type: "audio_chunk",
+    sequence: liveSequence,
+    duration_ms: Math.max(1, Math.round(durationMs)),
+  }));
+  liveSocket.send(encodePcmWav(samples, liveAudioContext.sampleRate));
 }
 
 function updateTaskProgress(task) {
@@ -400,6 +487,182 @@ async function handleCustomQuestion(event) {
   await handleAssistance("custom", elements.customQuestionButton, prompt);
 }
 
+function updateLiveTimer() {
+  if (!liveStartedAt) return;
+  elements.liveTimer.textContent = formatTimestamp((Date.now() - liveStartedAt) / 1000);
+}
+
+function updateLiveSessionStatus(session) {
+  if (!session) return;
+  elements.liveBackpressure.textContent = `${((session.queued_ms || 0) / 1000).toFixed(1)} 秒`;
+  elements.liveRevision.textContent = String(session.revision || 0);
+  liveCanSend = !["degraded", "full"].includes(session.backpressure);
+  elements.liveBackpressure.classList.toggle("is-warning", !liveCanSend);
+  elements.liveHint.textContent = liveCanSend
+    ? "麦克风音频正在本机处理，可修订字幕会在稳定后自动确认。"
+    : "服务端处理积压，客户端暂缓发送新音频，避免延迟继续增长。";
+}
+
+function mergeLiveSegments(finalSegments = [], partialSegments = null) {
+  finalSegments.forEach((segment) => {
+    const index = liveFinalSegments.findIndex((item) => item.id === segment.id);
+    if (index >= 0) liveFinalSegments[index] = segment;
+    else liveFinalSegments.push(segment);
+  });
+  liveFinalSegments.sort((left, right) => left.start - right.start);
+  if (partialSegments !== null) livePartialSegments = partialSegments;
+  latestResult = {
+    language: "zh",
+    duration: Math.max(0, ...[...liveFinalSegments, ...livePartialSegments].map((segment) => segment.end || 0)),
+    segments: [...liveFinalSegments, ...livePartialSegments],
+  };
+  renderLiveTranscript();
+}
+
+function handleLiveEvent(event) {
+  if (event.type === "session_ready" || event.type === "buffer_status") {
+    updateLiveSessionStatus(event.session);
+  } else if (event.type === "processing_status") {
+    elements.liveProcessing.textContent = event.state === "processing" ? "GPU 转写中" : "等待音频";
+    elements.livePulse.classList.toggle("is-processing", event.state === "processing");
+  } else if (event.type === "backpressure") {
+    liveCanSend = event.level === "normal" || event.level === "warning";
+    elements.liveBackpressure.textContent = `${((event.queued_ms || 0) / 1000).toFixed(1)} 秒`;
+    elements.liveBackpressure.classList.toggle("is-warning", !liveCanSend);
+  } else if (event.type === "transcript_partial") {
+    elements.liveRevision.textContent = String(event.revision || 0);
+    mergeLiveSegments([], event.segments || []);
+  } else if (event.type === "transcript_final") {
+    elements.liveRevision.textContent = String(event.revision || 0);
+    mergeLiveSegments(event.segments || [], null);
+  } else if (event.type === "processing_error" || event.type === "error") {
+    showError(event.detail || "实时字幕处理失败。");
+  } else if (event.type === "session_stopped") {
+    finishLiveUi();
+  }
+}
+
+async function startLiveSession() {
+  if (!navigator.mediaDevices?.getUserMedia || !window.AudioContext) {
+    showError("当前浏览器不支持实时麦克风采集，请使用最新版 Chrome、Edge 或 Firefox。");
+    return;
+  }
+
+  showError("");
+  liveFinalSegments = [];
+  livePartialSegments = [];
+  liveSequence = 0;
+  liveCanSend = true;
+  liveSampleBuffers = [];
+  liveSampleCount = 0;
+  renderLiveTranscript();
+  elements.startLiveButton.disabled = true;
+  elements.liveStatus.textContent = "正在请求麦克风权限";
+
+  try {
+    liveMediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+    });
+    liveAudioContext = new AudioContext();
+    const response = await fetch(`${API_BASE_URL}/api/stream/sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mime_type: "audio/wav;codecs=pcm_s16le",
+        sample_rate: liveAudioContext.sampleRate,
+        channels: 1,
+        chunk_duration_ms: STREAM_CHUNK_DURATION_MS,
+      }),
+    });
+    if (!response.ok) throw new Error("无法创建实时字幕会话。");
+    const session = await response.json();
+    liveSocket = new WebSocket(websocketUrl(session.websocket_url));
+    liveSocket.addEventListener("message", (message) => handleLiveEvent(JSON.parse(message.data)));
+    liveSocket.addEventListener("error", () => showError("实时字幕连接发生错误。"));
+    liveSocket.addEventListener("close", () => {
+      if (liveStartedAt) {
+        stopLiveCapture().finally(() => finishLiveUi());
+      }
+    });
+    await new Promise((resolve, reject) => {
+      liveSocket.addEventListener("open", resolve, { once: true });
+      liveSocket.addEventListener("error", reject, { once: true });
+    });
+
+    liveSourceNode = liveAudioContext.createMediaStreamSource(liveMediaStream);
+    liveProcessorNode = liveAudioContext.createScriptProcessor(4096, 1, 1);
+    liveProcessorNode.onaudioprocess = (event) => collectLiveSamples(event.inputBuffer.getChannelData(0));
+    liveSourceNode.connect(liveProcessorNode);
+    liveProcessorNode.connect(liveAudioContext.destination);
+
+    liveStartedAt = Date.now();
+    liveTimerHandle = window.setInterval(updateLiveTimer, 500);
+    elements.liveStatus.textContent = "正在聆听";
+    elements.livePulse.classList.add("is-live");
+    elements.startLiveButton.hidden = true;
+    elements.stopLiveButton.hidden = false;
+    elements.durationLabel.textContent = "实时字幕";
+    setState("live");
+  } catch (error) {
+    showError(error instanceof Error ? error.message : "无法启动实时麦克风。");
+    await releaseLiveResources();
+    elements.startLiveButton.disabled = false;
+    elements.liveStatus.textContent = "启动失败";
+    setState("error");
+  }
+}
+
+async function stopLiveSession() {
+  elements.stopLiveButton.disabled = true;
+  elements.liveStatus.textContent = "正在确认最后字幕";
+  await stopLiveCapture();
+  if (liveSocket?.readyState === WebSocket.OPEN) liveSocket.send(JSON.stringify({ type: "stop" }));
+}
+
+async function stopLiveCapture() {
+  if (liveProcessorNode) liveProcessorNode.onaudioprocess = null;
+  if (liveSampleCount && liveAudioContext && liveCanSend) {
+    const tail = new Float32Array(liveSampleCount);
+    let offset = 0;
+    liveSampleBuffers.forEach((samples) => {
+      tail.set(samples, offset);
+      offset += samples.length;
+    });
+    sendLiveAudioChunk(tail, tail.length / liveAudioContext.sampleRate * 1000);
+  }
+  liveSampleBuffers = [];
+  liveSampleCount = 0;
+  liveProcessorNode?.disconnect();
+  liveSourceNode?.disconnect();
+  liveMediaStream?.getTracks().forEach((track) => track.stop());
+  if (liveAudioContext && liveAudioContext.state !== "closed") await liveAudioContext.close();
+  liveProcessorNode = null;
+  liveSourceNode = null;
+  liveMediaStream = null;
+  liveAudioContext = null;
+}
+
+async function releaseLiveResources() {
+  await stopLiveCapture();
+  if (liveSocket && liveSocket.readyState < WebSocket.CLOSING) liveSocket.close();
+  liveSocket = null;
+}
+
+function finishLiveUi() {
+  window.clearInterval(liveTimerHandle);
+  liveTimerHandle = null;
+  liveStartedAt = null;
+  liveSocket = null;
+  elements.liveStatus.textContent = "实时字幕已结束";
+  elements.liveProcessing.textContent = "已完成";
+  elements.livePulse.classList.remove("is-live", "is-processing");
+  elements.startLiveButton.hidden = false;
+  elements.startLiveButton.disabled = false;
+  elements.stopLiveButton.hidden = true;
+  elements.stopLiveButton.disabled = false;
+  setState("complete");
+}
+
 async function handleTranscribe() {
   if (!selectedFile) {
     elements.audioInput.click();
@@ -449,22 +712,35 @@ async function handleUrlTranscribe() {
 }
 
 function setInputMode(nextMode) {
-  if (currentTaskId) {
-    showError("当前仍有任务运行，请先取消或等待任务完成。");
+  if (currentTaskId || liveStartedAt) {
+    showError("当前仍有任务运行，请先结束或等待任务完成。");
     return;
   }
   inputMode = nextMode;
   const isFileMode = inputMode === "file";
+  const isUrlMode = inputMode === "url";
+  const isLiveMode = inputMode === "live";
 
   elements.uploadZone.hidden = !isFileMode;
-  elements.urlZone.hidden = isFileMode;
+  elements.urlZone.hidden = !isUrlMode;
+  elements.liveZone.hidden = !isLiveMode;
   elements.fileModeButton.classList.toggle("active", isFileMode);
-  elements.urlModeButton.classList.toggle("active", !isFileMode);
+  elements.urlModeButton.classList.toggle("active", isUrlMode);
+  elements.liveModeButton.classList.toggle("active", isLiveMode);
 
   showError("");
   showNotice("");
   setState("idle");
   resetTaskProgress();
+  elements.taskProgress.hidden = isLiveMode;
+  if (isLiveMode) {
+    liveFinalSegments = [];
+    livePartialSegments = [];
+    elements.durationLabel.textContent = "等待开始";
+    renderLiveTranscript();
+  } else {
+    elements.durationLabel.textContent = selectedFile ? "等待转写" : "等待输入";
+  }
 }
 
 function renderTranscript(segments, isDemo) {
@@ -479,7 +755,7 @@ function renderTranscript(segments, isDemo) {
 
   segments.forEach((segment) => {
     const item = document.createElement("div");
-    item.className = "transcript-item";
+    item.className = `transcript-item ${segment.final === false ? "transcript-partial" : ""}`;
 
     const meta = document.createElement("div");
     meta.className = "transcript-meta";
@@ -498,6 +774,26 @@ function renderTranscript(segments, isDemo) {
     item.append(meta, text);
     elements.transcriptList.append(item);
   });
+}
+
+function renderLiveTranscript() {
+  const segments = [...liveFinalSegments, ...livePartialSegments].sort((left, right) => left.start - right.start);
+  if (!segments.length) {
+    elements.transcriptList.innerHTML = `
+      <div class="live-empty">
+        <span class="live-empty-wave">••••</span>
+        <strong>实时字幕会出现在这里</strong>
+        <p>可修订字幕会以浅色显示，稳定后自动变为已确认字幕。</p>
+      </div>
+    `;
+  } else {
+    renderTranscript(segments, false);
+    elements.transcriptList.scrollTop = elements.transcriptList.scrollHeight;
+  }
+  const context = segments.slice(-3).map((segment) => segment.text).join(" ");
+  elements.focusTitle.textContent = context ? "实时讨论焦点" : "等待讨论开始";
+  elements.focusSummary.textContent = context || "开始实时字幕后，这里会跟随最近的讨论内容更新。";
+  elements.focusMeterLast.classList.toggle("active", Boolean(context));
 }
 
 function renderDemo() {
@@ -530,6 +826,13 @@ elements.cancelTaskButton.addEventListener("click", cancelCurrentTask);
 elements.customQuestionForm.addEventListener("submit", handleCustomQuestion);
 elements.fileModeButton.addEventListener("click", () => setInputMode("file"));
 elements.urlModeButton.addEventListener("click", () => setInputMode("url"));
+elements.liveModeButton.addEventListener("click", () => setInputMode("live"));
+elements.startLiveButton.addEventListener("click", startLiveSession);
+elements.stopLiveButton.addEventListener("click", stopLiveSession);
+window.addEventListener("beforeunload", () => {
+  liveMediaStream?.getTracks().forEach((track) => track.stop());
+  if (liveSocket?.readyState === WebSocket.OPEN) liveSocket.close();
+});
 elements.audioInput.addEventListener("change", (event) => {
   const file = event.target.files && event.target.files[0];
   if (file) selectFile(file);

@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from app.main import app, get_stream_session_manager
 from app.schemas import StreamSessionCreateRequest, TranscriptSegment
 from app.stream_processing import (
+    build_pcm_wav_window,
     ProcessingAudioChunk,
     TranscriptRevisionTracker,
     WhisperStreamProcessor,
@@ -409,6 +410,58 @@ def test_whisper_stream_processor_writes_encoded_window_to_temporary_file():
     )
 
     assert seen == {"suffix": ".webm", "payload": b"firstsecond"}
+
+
+def test_pcm_wav_window_combines_independently_decodable_chunks():
+    import io
+    import wave
+
+    def wav_chunk(samples):
+        output = io.BytesIO()
+        with wave.open(output, "wb") as target:
+            target.setnchannels(1)
+            target.setsampwidth(2)
+            target.setframerate(16000)
+            target.writeframes(samples)
+        return output.getvalue()
+
+    combined = build_pcm_wav_window(
+        [
+            ProcessingAudioChunk(1, 1000, wav_chunk(b"\x01\x00" * 4)),
+            ProcessingAudioChunk(2, 1000, wav_chunk(b"\x02\x00" * 3)),
+        ]
+    )
+
+    with wave.open(io.BytesIO(combined), "rb") as source:
+        assert source.getnchannels() == 1
+        assert source.getframerate() == 16000
+        assert source.getnframes() == 7
+        assert source.readframes(7) == b"\x01\x00" * 4 + b"\x02\x00" * 3
+
+
+def test_pcm_wav_window_rejects_mismatched_formats_and_invalid_audio():
+    import io
+    import wave
+
+    def wav_chunk(sample_rate):
+        output = io.BytesIO()
+        with wave.open(output, "wb") as target:
+            target.setnchannels(1)
+            target.setsampwidth(2)
+            target.setframerate(sample_rate)
+            target.writeframes(b"\x00\x00" * 4)
+        return output.getvalue()
+
+    with pytest.raises(ValueError, match="formats must match"):
+        build_pcm_wav_window(
+            [
+                ProcessingAudioChunk(1, 1000, wav_chunk(16000)),
+                ProcessingAudioChunk(2, 1000, wav_chunk(48000)),
+            ]
+        )
+
+    with pytest.raises(ValueError, match="Invalid PCM WAV"):
+        build_pcm_wav_window([ProcessingAudioChunk(1, 1000, b"not-a-wav")])
 
 
 def test_stream_event_queue_discards_oldest_event_when_full():

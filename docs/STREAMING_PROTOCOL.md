@@ -91,3 +91,17 @@ configured number of revisions.
 For WebSocket clients, `stop` waits for the active processing window before
 emitting `session_stopped`, up to the configured stop timeout. This allows the
 final transcript event to arrive before the socket closes.
+
+## Browser microphone format
+
+The Phase 5C frontend sends:
+
+```text
+mime_type: audio/wav;codecs=pcm_s16le
+channels: 1
+sample width: 16-bit
+```
+
+Every binary frame is a complete, independently decodable WAV file. The
+backend validates matching channel count, sample width, and sample rate before
+combining chunks into the sliding inference window.

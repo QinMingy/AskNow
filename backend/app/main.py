@@ -60,7 +60,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Classroom Comprehension Assistant API",
-    version="0.6.0",
+    version="0.7.0",
     lifespan=lifespan,
 )
 
