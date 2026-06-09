@@ -1,5 +1,6 @@
 import logging
 import threading
+import time
 import wave
 from dataclasses import dataclass
 from io import BytesIO
@@ -47,8 +48,9 @@ class FunASRStreamProcessor:
         chunk_size: tuple[int, int, int] = (0, 10, 5),
         encoder_chunk_look_back: int = 4,
         decoder_chunk_look_back: int = 1,
-        offline_only: bool = True,
+        offline_only: bool = False,
         model_factory=None,
+        model_downloader=None,
     ):
         self.model_name = model
         self.device = device
@@ -57,6 +59,7 @@ class FunASRStreamProcessor:
         self.decoder_chunk_look_back = decoder_chunk_look_back
         self.offline_only = offline_only
         self._model_factory = model_factory
+        self._model_downloader = model_downloader
         self._model = None
         self._model_lock = threading.Lock()
         self._ready = threading.Event()
@@ -93,7 +96,7 @@ class FunASRStreamProcessor:
         import numpy as np
 
         speech = np.frombuffer(payload, dtype="<i2").astype(np.float32) / 32768.0
-        logger.info(
+        logger.debug(
             "funasr.stream.inference start_ms=%s chunks=%s samples=%s is_final=%s",
             window_start_ms,
             len(chunks),
@@ -114,7 +117,7 @@ class FunASRStreamProcessor:
             if isinstance(item, dict) and str(item.get("text", "")).strip()
         ]
         duration = sum(chunk.duration_ms for chunk in chunks) / 1000
-        logger.info("funasr.stream.inference.complete texts=%s", len(texts))
+        logger.debug("funasr.stream.inference.complete texts=%s", len(texts))
         return [
             TranscriptSegment(
                 id=index,
@@ -144,6 +147,8 @@ class FunASRStreamProcessor:
                     self.model_name,
                     offline_only=self.offline_only,
                 )
+                if not is_complete_funasr_model(Path(resolved_model)):
+                    resolved_model = self._download_model(resolved_model)
                 self._model = self._model_factory(
                     model=resolved_model,
                     device=self.device,
@@ -158,8 +163,44 @@ class FunASRStreamProcessor:
                 self._ready.set()
         return self._model
 
+    def _download_model(self, model: str) -> str:
+        started = time.perf_counter()
+        repository = funasr_model_repository(model)
+        logger.warning(
+            "funasr.model.download.start model=%s repository=%s",
+            model,
+            repository,
+        )
+        try:
+            if self._model_downloader is None:
+                from modelscope.hub.snapshot_download import snapshot_download
 
-def resolve_funasr_model_path(model: str, *, offline_only: bool = True) -> str:
+                self._model_downloader = snapshot_download
+            downloaded = Path(
+                self._model_downloader(
+                    repository,
+                    revision="master",
+                )
+            )
+            if not is_complete_funasr_model(downloaded):
+                raise RuntimeError(f"Downloaded FunASR model is incomplete: {downloaded}")
+        except Exception:
+            logger.exception(
+                "funasr.model.download.failed model=%s repository=%s",
+                model,
+                repository,
+            )
+            raise
+        logger.warning(
+            "funasr.model.download.complete model=%s path=%s elapsed_seconds=%.1f",
+            model,
+            downloaded,
+            time.perf_counter() - started,
+        )
+        return str(downloaded)
+
+
+def resolve_funasr_model_path(model: str, *, offline_only: bool = False) -> str:
     supplied = Path(model).expanduser()
     if is_complete_funasr_model(supplied):
         return str(supplied)
@@ -169,12 +210,7 @@ def resolve_funasr_model_path(model: str, *, offline_only: bool = True) -> str:
             "Expected config.yaml, model.pt, tokens.json, and am.mvn."
         )
 
-    cached_repositories = {
-        "paraformer-zh-streaming": (
-            "iic",
-            "speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online",
-        ),
-    }
+    cached_repositories = funasr_cached_repositories()
     repository = cached_repositories.get(model)
     if repository is None:
         if offline_only:
@@ -198,6 +234,20 @@ def resolve_funasr_model_path(model: str, *, offline_only: bool = True) -> str:
 def is_complete_funasr_model(path: Path) -> bool:
     required = ("config.yaml", "model.pt", "tokens.json", "am.mvn")
     return path.is_dir() and all((path / name).is_file() for name in required)
+
+
+def funasr_cached_repositories() -> dict[str, tuple[str, str]]:
+    return {
+        "paraformer-zh-streaming": (
+            "iic",
+            "speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online",
+        ),
+    }
+
+
+def funasr_model_repository(model: str) -> str:
+    repository = funasr_cached_repositories().get(model)
+    return "/".join(repository) if repository else model
 
 
 class WhisperStreamProcessor:

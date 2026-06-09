@@ -19,9 +19,10 @@ roughly 600 ms server-side inference batches. Uploaded audio and video URLs
 continue to use faster-whisper. See `PHASE_5C_PLAN.md` and
 `docs/STREAMING_PROTOCOL.md`.
 
-FunASR live startup is strictly offline by default. `start_demo.bat` verifies
-that the complete local streaming model is installed before starting services;
-the backend never downloads the model during a classroom or meeting session.
+FunASR live startup prefers the complete local streaming model. If it is
+missing, the backend downloads it once and clearly logs download start,
+completion, local path, and elapsed time. Set `FUNASR_OFFLINE_ONLY=true` when
+the deployment must reject missing models instead of downloading.
 
 课堂/会议中的实时理解无障碍助手第一阶段 Demo。
 

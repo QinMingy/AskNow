@@ -80,12 +80,17 @@ async def log_requests(request: Request, call_next):
     request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:8]
     token = request_id_var.set(request_id)
     started = time.perf_counter()
-    logger.info("request.start method=%s path=%s", request.method, request.url.path)
+    logger.debug("request.start method=%s path=%s", request.method, request.url.path)
     try:
         response = await call_next(request)
         elapsed_ms = (time.perf_counter() - started) * 1000
         response.headers["X-Request-ID"] = request_id
-        logger.info(
+        log_request_complete = (
+            logger.debug
+            if request.url.path == "/health" and response.status_code < 400
+            else logger.info
+        )
+        log_request_complete(
             "request.complete method=%s path=%s status=%s elapsed_ms=%.1f",
             request.method,
             request.url.path,

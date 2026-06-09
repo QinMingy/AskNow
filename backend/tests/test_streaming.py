@@ -520,7 +520,7 @@ def test_funasr_model_resolution_prefers_complete_local_cache(monkeypatch, tmp_p
 
     assert resolve_funasr_model_path("paraformer-zh-streaming") == str(model_dir)
     with pytest.raises(FileNotFoundError, match="FUNASR_OFFLINE_ONLY"):
-        resolve_funasr_model_path("another-model")
+        resolve_funasr_model_path("another-model", offline_only=True)
     assert (
         resolve_funasr_model_path("another-model", offline_only=False)
         == "another-model"
@@ -531,7 +531,40 @@ def test_funasr_model_resolution_rejects_missing_local_model(monkeypatch, tmp_pa
     monkeypatch.setattr("app.stream_processing.Path.home", lambda: tmp_path)
 
     with pytest.raises(FileNotFoundError, match="Automatic download is disabled"):
-        resolve_funasr_model_path("paraformer-zh-streaming")
+        resolve_funasr_model_path("paraformer-zh-streaming", offline_only=True)
+
+
+def test_funasr_processor_downloads_missing_model_with_explicit_downloader(
+    monkeypatch,
+    tmp_path,
+):
+    downloaded = tmp_path / "downloaded-model"
+    downloaded.mkdir()
+    for filename in ("config.yaml", "model.pt", "tokens.json", "am.mvn"):
+        (downloaded / filename).write_bytes(b"content")
+    calls = []
+
+    def downloader(repository, revision):
+        calls.append((repository, revision))
+        return str(downloaded)
+
+    class FakeModel:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    monkeypatch.setattr("app.stream_processing.Path.home", lambda: tmp_path)
+    processor = FunASRStreamProcessor(
+        offline_only=False,
+        model_factory=FakeModel,
+        model_downloader=downloader,
+    )
+
+    model = processor._get_model()
+
+    assert calls == [
+        ("iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online", "master")
+    ]
+    assert model.kwargs["model"] == str(downloaded)
 
 
 def test_stream_manager_commits_incremental_processor_results():

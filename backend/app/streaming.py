@@ -116,7 +116,7 @@ class StreamSessionManager:
             return
         with self._lock:
             if self._warmup_future is None:
-                logger.info("stream.processor.warmup.submitted")
+                logger.debug("stream.processor.warmup.submitted")
                 self._warmup_future = self._executor.submit(self._warm_up_processor)
 
     @property
@@ -258,7 +258,7 @@ class StreamSessionManager:
             session.updated_at = utc_now()
             session.wake_worker.set()
             response = self._status(session)
-        logger.info(
+        logger.debug(
             "stream.chunk.accepted session_id=%s sequence=%s duration_ms=%s queued_ms=%s",
             session_id,
             sequence,
