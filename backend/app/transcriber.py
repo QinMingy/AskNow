@@ -4,13 +4,15 @@ from tempfile import NamedTemporaryFile, TemporaryDirectory
 from fastapi import HTTPException, UploadFile, status
 
 from .config import Settings
+from .diarization import Diarizer
 from .schemas import SourceMetadata, TranscriptSegment, TranscriptionResponse
 from .sources.registry import SourceRegistry
 
 
 class WhisperTranscriber:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, diarizer: Diarizer):
         self.settings = settings
+        self.diarizer = diarizer
         self._model = None
 
     def _load_model(self):
@@ -100,10 +102,11 @@ class WhisperTranscriber:
                         id=idx,
                         start=round(float(segment.start), 2),
                         end=round(float(segment.end), 2),
-                        speaker="Speaker A" if idx % 2 else "Speaker B",
+                        speaker="Unknown",
                         text=segment.text.strip(),
                     )
                 )
+            segments = self.diarizer.assign_speakers(audio_path, segments)
         except HTTPException:
             raise
         except Exception as exc:

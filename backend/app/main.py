@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import Settings, get_settings
 from .assistant import AssistProviderFactory, UnderstandingAssistant
+from .diarization import create_diarizer
 from .provider_status import get_assist_provider_status
 from .schemas import (
     AssistProviderStatus,
@@ -33,7 +34,14 @@ app.add_middleware(
 
 @lru_cache
 def get_transcriber() -> WhisperTranscriber:
-    return WhisperTranscriber(get_settings())
+    settings = get_settings()
+    diarizer = create_diarizer(
+        settings.diarization_provider,
+        model=settings.diarization_model,
+        token=settings.huggingface_token,
+        device=settings.diarization_device,
+    )
+    return WhisperTranscriber(settings, diarizer)
 
 
 @lru_cache
@@ -62,6 +70,7 @@ def health(settings: Settings = Depends(get_settings)) -> HealthResponse:
         api_version=app.version,
         asr_engine="faster-whisper",
         device=settings.whisper_device,
+        diarization_provider=settings.diarization_provider,
         assist_provider=settings.assist_provider,
         supported_video_sources=["YouTube", "Bilibili"],
         browser_cookie_sources=["edge", "chrome", "firefox"],

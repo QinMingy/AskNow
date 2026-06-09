@@ -1,0 +1,65 @@
+# Pyannote Speaker Diarization Guide
+
+This project uses two separate local model stages:
+
+```text
+audio
+  -> faster-whisper: speech-to-text and timestamps
+  -> pyannote/speaker-diarization-3.1: speaker time ranges
+  -> overlap alignment: transcript segments with Speaker A/B labels
+```
+
+Adding pyannote does not replace or disable Whisper.
+
+## Hugging Face access
+
+The model is gated. Before the first run:
+
+1. Sign in to Hugging Face.
+2. Accept the conditions for:
+   - `https://huggingface.co/pyannote/segmentation-3.0`
+   - `https://huggingface.co/pyannote/speaker-diarization-3.1`
+3. Create a User Access Token at `https://huggingface.co/settings/tokens`.
+4. A read token is sufficient. Do not grant write access.
+
+Set the token for the current PowerShell session:
+
+```powershell
+$env:HF_TOKEN="hf_your_read_token"
+.\start_demo.bat
+```
+
+The first transcription downloads the gated model into the Hugging Face cache.
+Later runs use the local cache unless the model needs updating.
+
+## Configuration
+
+Real speaker diarization is the default:
+
+```powershell
+$env:DIARIZATION_PROVIDER="pyannote"
+$env:DIARIZATION_MODEL="pyannote/speaker-diarization-3.1"
+$env:DIARIZATION_DEVICE="cuda"
+$env:HF_TOKEN="hf_your_read_token"
+```
+
+To explicitly use simulated Speaker A/B labels for UI development:
+
+```powershell
+$env:DIARIZATION_PROVIDER="mock"
+```
+
+The backend does not silently switch from pyannote to mock mode. If the token,
+model authorization, network, or GPU environment is unavailable, it returns a
+clear error instead of presenting simulated labels as real speakers.
+
+## Environment verification
+
+```powershell
+& "$env:USERPROFILE\miniforge3\Scripts\conda.exe" run --no-capture-output `
+  -n whisperproject python scripts\check_environment.py
+```
+
+The environment should report `torch CUDA`, `pyannote.audio`, and the existing
+faster-whisper CUDA libraries as available. `HF_TOKEN` is reported separately
+because it is a user secret and is not stored in the repository.

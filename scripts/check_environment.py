@@ -1,5 +1,6 @@
 import ctypes
 import importlib.util
+import os
 import shutil
 import subprocess
 import sys
@@ -46,16 +47,34 @@ def check_cuda_compute_types() -> str:
     return ", ".join(sorted(compute_types))
 
 
+def check_torch_cuda() -> str:
+    try:
+        import torch
+
+        if not torch.cuda.is_available():
+            return "error: torch CUDA is unavailable"
+        return f"ok: {torch.cuda.get_device_name(0)}"
+    except Exception as exc:
+        return f"error: {exc}"
+
+
 def main() -> int:
     checks = {
         "python": sys.version.split()[0],
         "fastapi": check_python_package("fastapi"),
         "faster_whisper": check_python_package("faster_whisper"),
+        "torch": check_python_package("torch"),
+        "torchaudio": check_python_package("torchaudio"),
+        "pyannote.audio": check_python_package("pyannote.audio"),
         "uvicorn": check_python_package("uvicorn"),
         "yt_dlp": check_python_package("yt_dlp"),
+        "HF_TOKEN": "configured"
+        if os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_ACCESS_TOKEN")
+        else "not configured (required for pyannote model download)",
         "nvidia-smi": run_version(
             ["nvidia-smi", "--query-gpu=name,driver_version", "--format=csv,noheader"]
         ),
+        "torch CUDA": check_torch_cuda(),
         "cublas64_12.dll": check_dll("cublas64_12.dll"),
         "cudnn64_9.dll": check_dll("cudnn64_9.dll"),
         "cuda compute types": check_cuda_compute_types(),

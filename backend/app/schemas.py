@@ -69,6 +69,7 @@ class HealthResponse(BaseModel):
     api_version: str
     asr_engine: str
     device: str
+    diarization_provider: str
     assist_provider: str
     supported_video_sources: list[str]
     browser_cookie_sources: list[str]

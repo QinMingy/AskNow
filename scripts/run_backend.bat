@@ -16,7 +16,13 @@ if not defined DEEPSEEK_API_KEY if not defined ASSIST_API_KEY (
   echo.
 )
 
-"%CONDA_EXE%" run -n "%CONDA_ENV%" python -c "import faster_whisper, requests, yt_dlp" >nul 2>nul
+if not defined HF_TOKEN if not defined HUGGINGFACE_ACCESS_TOKEN (
+  echo [WARNING] HF_TOKEN is not set. The default pyannote speaker diarization provider cannot download its gated model.
+  echo           Accept both pyannote model conditions and set HF_TOKEN, or explicitly set DIARIZATION_PROVIDER=mock.
+  echo.
+)
+
+"%CONDA_EXE%" run -n "%CONDA_ENV%" python -c "import faster_whisper, requests, yt_dlp, torch, torchaudio, pyannote.audio" >nul 2>nul
 if errorlevel 1 (
   echo [ERROR] Backend dependencies are incomplete.
   echo Repairing dependencies from requirements.txt...
