@@ -101,6 +101,17 @@ class RuleBasedAssistProvider:
         request: AssistRequest,
         segments: list[TranscriptSegment],
     ) -> AssistResponse:
+        if any(segment.speaker == "Speaker pending" for segment in segments):
+            return AssistResponse(
+                action=request.action,
+                provider=self.name,
+                title="观点关系暂待确认",
+                summary=(
+                    "实时字幕尚未完成说话人分离，因此现在不能可靠判断谁支持或反对谁。"
+                ),
+                bullets=self._speaker_lines(segments, limit=6),
+                caution="请先根据内容理解观点；人物归属需等待说话人修订后确认。",
+            )
         speakers = []
         for segment in segments:
             if segment.speaker not in speakers:
@@ -300,6 +311,7 @@ class OpenAICompatibleAssistProvider:
             "- 不要重复字幕原文作为唯一结果。\n"
             "- 不要替用户发言，只给用户可确认的理解或表达草稿。\n"
             "- bullets 应该服务于当前 action，而不是泛泛总结。\n"
+            "- Speaker pending 表示尚未完成说话人识别，禁止据此判断谁支持或反对谁。\n"
             "字幕：\n"
             + "\n".join(lines)
         )

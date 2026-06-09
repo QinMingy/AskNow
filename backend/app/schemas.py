@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 
 class TranscriptSegment(BaseModel):
-    id: int
+    id: int | str
     start: float
     end: float
     speaker: str
@@ -162,6 +162,7 @@ class HealthResponse(BaseModel):
     api_version: str
     asr_engine: str
     live_asr_engine: str
+    live_asr_ready: bool
     device: str
     diarization_provider: str
     assist_provider: str

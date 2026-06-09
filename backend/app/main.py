@@ -49,6 +49,8 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    stream_manager = get_stream_session_manager()
+    stream_manager.warm_up()
     yield
     if get_task_manager.cache_info().currsize:
         logger.info("task_manager.shutdown")
@@ -195,13 +197,17 @@ def get_stream_session_manager() -> StreamSessionManager:
 
 
 @app.get("/health", response_model=HealthResponse)
-def health(settings: Settings = Depends(get_settings)) -> HealthResponse:
+def health(
+    settings: Settings = Depends(get_settings),
+    stream_manager: StreamSessionManager = Depends(get_stream_session_manager),
+) -> HealthResponse:
     return HealthResponse(
         status="ok",
         service=settings.app_name,
         api_version=app.version,
         asr_engine="faster-whisper",
         live_asr_engine=settings.stream_processor,
+        live_asr_ready=stream_manager.processor_ready,
         device=settings.whisper_device,
         diarization_provider=settings.diarization_provider,
         assist_provider=settings.assist_provider,

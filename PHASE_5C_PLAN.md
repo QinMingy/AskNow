@@ -42,7 +42,7 @@ may not contain the headers needed for independent decoding.
   should move sample collection into an AudioWorklet.
 - The local queue is memory-backed and has no reconnect persistence yet.
 - Incremental speaker diarization is not enabled. A single microphone is a
-  mixed mono source, so live subtitles use `Mixed speakers` instead of
+  mixed mono source, so live subtitles use `Speaker pending` instead of
   inventing Speaker A/B identities. A later diarization stage may revise them.
 - Browsers may apply echo cancellation and noise suppression differently.
 

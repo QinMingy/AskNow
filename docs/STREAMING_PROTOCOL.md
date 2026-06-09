@@ -119,8 +119,8 @@ FunASR Paraformer Streaming.
 
 A single browser microphone sends one mixed mono channel. The live path must
 not invent `Speaker A/B` identities from that mixed signal. FunASR live
-segments therefore use `Mixed speakers`, which the frontend presents as
-`多人混合`.
+segments therefore use `Speaker pending`, which the frontend presents as
+`发言者待识别`.
 
 The frontend groups adjacent FunASR fragments into stable display turns and
 updates only the active turn. Existing subtitle nodes are preserved, so older
@@ -129,6 +129,12 @@ lines do not replay animations or force the user's scroll position to jump.
 Reliable speaker attribution and overlapping-speech separation require a
 separate diarization/revision stage. They should be emitted later as explicit
 speaker revision events rather than silently rewriting live identities.
+
+The backend starts loading the FunASR model during FastAPI startup. If audio
+arrives before warm-up completes, capture continues and the client receives a
+`processing_status` event with `state: "initializing"` until inference begins.
+`GET /health` also exposes `live_asr_ready` so clients can distinguish model
+warm-up from microphone capture latency.
 
 Relevant environment variables:
 

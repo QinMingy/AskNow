@@ -369,6 +369,13 @@ async function checkBackendCapabilities() {
           "请运行 stop_demo.bat 后再运行 start_demo.bat，确认新版后端运行在 8010 端口。",
       );
     }
+    if (health.live_asr_engine === "funasr" && !health.live_asr_ready) {
+      elements.liveProcessing.textContent = "模型预热中";
+      elements.liveHint.textContent = "后端正在预热实时识别模型；可以开始录音，首批字幕会在模型就绪后出现。";
+      window.setTimeout(checkBackendCapabilities, 1000);
+    } else if (!liveStartedAt) {
+      elements.liveProcessing.textContent = "已就绪";
+    }
   } catch {
     // The normal upload flow will show a useful connection error when needed.
   }
@@ -568,7 +575,7 @@ function updateLiveSessionStatus(session) {
   liveCanSend = !["degraded", "full"].includes(session.backpressure);
   elements.liveBackpressure.classList.toggle("is-warning", !liveCanSend);
   elements.liveHint.textContent = liveCanSend
-    ? "麦克风音频正在本机处理；单麦克风中的多人声音统一标记为“多人混合”，不会猜测身份。"
+    ? "麦克风音频正在本机处理；实时阶段先标记发言者待识别，会后再进行说话人修订。"
     : "服务端处理积压，未发送音频正在本地排队，不会直接丢弃。";
   scheduleLiveQueueDrain();
 }
@@ -599,7 +606,9 @@ function scheduleLiveTranscriptRender({ immediate = false } = {}) {
 }
 
 function liveSpeakerLabel(speaker) {
-  return speaker === "Mixed speakers" || speaker === "Unknown" ? "多人混合" : speaker;
+  return ["Speaker pending", "Mixed speakers", "Unknown"].includes(speaker)
+    ? "发言者待识别"
+    : speaker;
 }
 
 function buildLiveDisplaySegments(segments) {
@@ -646,7 +655,7 @@ function updateTranscriptItem(item, segment) {
   item.classList.toggle("transcript-partial", segment.final === false);
   item.querySelector('[data-role="time"]').textContent = formatTimestamp(segment.start);
   const speaker = item.querySelector('[data-role="speaker"]');
-  speaker.className = `speaker-chip ${String(segment.speaker).endsWith("B") ? "speaker-b" : ""} ${segment.speaker === "多人混合" ? "speaker-mixed" : ""}`;
+  speaker.className = `speaker-chip ${String(segment.speaker).endsWith("B") ? "speaker-b" : ""} ${segment.speaker === "发言者待识别" ? "speaker-pending" : ""}`;
   speaker.textContent = segment.speaker;
   const text = item.querySelector('[data-role="text"]');
   if (text.textContent !== segment.text) text.textContent = segment.text;
@@ -684,7 +693,11 @@ function handleLiveEvent(event) {
   if (event.type === "session_ready" || event.type === "buffer_status") {
     updateLiveSessionStatus(event.session);
   } else if (event.type === "processing_status") {
-    elements.liveProcessing.textContent = event.state === "processing" ? "GPU 转写中" : "等待音频";
+    elements.liveProcessing.textContent = event.state === "initializing"
+      ? "模型初始化中"
+      : event.state === "processing"
+        ? "GPU 转写中"
+        : "等待音频";
     elements.livePulse.classList.toggle("is-processing", event.state === "processing");
   } else if (event.type === "backpressure") {
     liveCanSend = event.level === "normal" || event.level === "warning";
@@ -947,7 +960,7 @@ function renderLiveTranscript() {
         <div class="live-empty">
           <span class="live-empty-wave">••••</span>
           <strong>实时字幕会出现在这里</strong>
-          <p>单麦克风会将多人声音标记为“多人混合”，不会猜测发言身份。</p>
+          <p>实时阶段先标记为“发言者待识别”；单麦克风无法可靠区分同时说话的人。</p>
         </div>
       `;
     }

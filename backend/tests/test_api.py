@@ -52,6 +52,7 @@ def test_health():
     assert response.json()["api_version"] == "0.9.0"
     assert response.json()["asr_engine"] == "faster-whisper"
     assert response.json()["live_asr_engine"] == "funasr"
+    assert isinstance(response.json()["live_asr_ready"], bool)
     assert response.json()["diarization_provider"] == "pyannote"
     assert response.json()["assist_provider"] == "litellm"
     assert "chrome" in response.json()["browser_cookie_sources"]

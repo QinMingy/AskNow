@@ -37,7 +37,7 @@ class FunASRSessionState:
 
 class FunASRStreamProcessor:
     incremental = True
-    speaker_label = "Mixed speakers"
+    speaker_label = "Speaker pending"
 
     def __init__(
         self,
@@ -57,6 +57,14 @@ class FunASRStreamProcessor:
         self._model_factory = model_factory
         self._model = None
         self._model_lock = threading.Lock()
+        self._ready = threading.Event()
+
+    @property
+    def ready(self) -> bool:
+        return self._ready.is_set()
+
+    def prepare(self) -> None:
+        self._get_model()
 
     def create_session(self, *, mime_type: str, sample_rate: int, channels: int):
         if "pcm" not in mime_type.lower():
@@ -142,6 +150,7 @@ class FunASRStreamProcessor:
                     self.model_name,
                     resolved_model,
                 )
+                self._ready.set()
         return self._model
 
 

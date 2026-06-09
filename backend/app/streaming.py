@@ -109,6 +109,30 @@ class StreamSessionManager:
         )
         self._sessions: dict[str, StreamSession] = {}
         self._lock = threading.RLock()
+        self._warmup_future: Future | None = None
+
+    def warm_up(self) -> None:
+        if self.processor is None or not hasattr(self.processor, "prepare"):
+            return
+        with self._lock:
+            if self._warmup_future is None:
+                logger.info("stream.processor.warmup.submitted")
+                self._warmup_future = self._executor.submit(self._warm_up_processor)
+
+    @property
+    def processor_ready(self) -> bool:
+        if self.processor is None:
+            return True
+        return bool(getattr(self.processor, "ready", True))
+
+    def _warm_up_processor(self) -> None:
+        logger.info("stream.processor.warmup.start")
+        try:
+            self.processor.prepare()
+        except Exception:
+            logger.exception("stream.processor.warmup.failed")
+        else:
+            logger.info("stream.processor.warmup.complete")
 
     def create(self, request: StreamSessionCreateRequest) -> StreamSessionCreatedResponse:
         self._cleanup_expired()
@@ -454,7 +478,12 @@ class StreamSessionManager:
             if incremental
             else max(0, session.processed_ms - session.history_ms)
         )
-        self._publish(session, "processing_status", state="processing")
+        processor_ready = getattr(self.processor, "ready", True)
+        self._publish(
+            session,
+            "processing_status",
+            state="processing" if processor_ready else "initializing",
+        )
         try:
             with self.gpu_scheduler.acquire():
                 if incremental:

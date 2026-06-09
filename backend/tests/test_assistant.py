@@ -118,6 +118,58 @@ def test_assist_api_returns_structured_result():
     assert response.json()["bullets"]
 
 
+def test_assist_api_accepts_live_transcript_string_ids():
+    app.dependency_overrides[get_understanding_assistant] = lambda: UnderstandingAssistant(
+        RuleBasedAssistProvider()
+    )
+    client = TestClient(app)
+
+    try:
+        response = client.post(
+            "/api/assist",
+            json={
+                "action": "explain",
+                "segments": [
+                    {
+                        "id": "0-600-1-1",
+                        "start": 0.0,
+                        "end": 0.6,
+                        "speaker": "Speaker pending",
+                        "text": "这是实时字幕上下文。",
+                        "revision": 1,
+                        "final": True,
+                    }
+                ],
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["action"] == "explain"
+
+
+def test_conflict_does_not_invent_relationships_for_pending_live_speakers():
+    assistant = UnderstandingAssistant(RuleBasedAssistProvider())
+
+    response = assistant.assist(
+        AssistRequest(
+            action="conflict",
+            segments=[
+                TranscriptSegment(
+                    id="live-1",
+                    start=0,
+                    end=1,
+                    speaker="Speaker pending",
+                    text="我们先讨论方案。",
+                )
+            ],
+        )
+    )
+
+    assert "不能可靠判断" in response.summary
+
+
 def test_assist_api_rejects_unknown_action():
     client = TestClient(app)
 

@@ -481,7 +481,7 @@ def test_funasr_stream_processor_uses_raw_pcm_and_per_session_cache():
     )
 
     assert segments[0].text == "实时识别"
-    assert segments[0].speaker == "Mixed speakers"
+    assert segments[0].speaker == "Speaker pending"
     assert calls[0]["input"].shape == (3200,)
     assert calls[0]["chunk_size"] == [0, 10, 5]
     assert first_state.cache == {"seen": True}
@@ -612,6 +612,25 @@ def test_stream_manager_keeps_incremental_inference_batches_bounded():
 
     assert sum(chunk.duration_ms for chunk in first) == 600
     assert sum(chunk.duration_ms for chunk in second) == 600
+    manager.shutdown()
+
+
+def test_stream_manager_warms_up_processor_once():
+    class WarmableProcessor:
+        def __init__(self):
+            self.calls = 0
+
+        def prepare(self):
+            self.calls += 1
+
+    processor = WarmableProcessor()
+    manager = StreamSessionManager(processor=processor)
+
+    manager.warm_up()
+    manager.warm_up()
+    manager._warmup_future.result(timeout=1)
+
+    assert processor.calls == 1
     manager.shutdown()
 
 
