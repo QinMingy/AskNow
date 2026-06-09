@@ -2,7 +2,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from app.main import app, get_source_registry, get_transcriber
+from app.main import app, get_source_registry, get_task_manager, get_transcriber
 from app.schemas import SourceMetadata, TranscriptSegment, TranscriptionResponse
 
 
@@ -49,7 +49,7 @@ def test_health():
 
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
-    assert response.json()["api_version"] == "0.3.0"
+    assert response.json()["api_version"] == "0.4.0"
     assert response.json()["asr_engine"] == "faster-whisper"
     assert response.json()["diarization_provider"] == "pyannote"
     assert response.json()["assist_provider"] == "litellm"
@@ -148,3 +148,41 @@ def test_transcribe_url_accepts_browser_cookie_source():
 
     assert response.status_code == 200
     assert seen["browser"] == "edge"
+
+
+def test_task_routes_delegate_to_task_manager():
+    class FakeTaskManager:
+        def get_status(self, task_id):
+            return {
+                "task_id": task_id,
+                "stage": "queued",
+                "progress": 0,
+                "message": "Task queued",
+                "cancel_requested": False,
+                "created_at": "2026-06-09T00:00:00Z",
+                "updated_at": "2026-06-09T00:00:00Z",
+            }
+
+        def cancel(self, task_id):
+            status = self.get_status(task_id)
+            status.update(
+                stage="cancelled",
+                message="Task cancelled",
+                cancel_requested=True,
+                completed_at="2026-06-09T00:00:01Z",
+            )
+            return status
+
+    app.dependency_overrides[get_task_manager] = lambda: FakeTaskManager()
+    client = TestClient(app)
+
+    try:
+        status_response = client.get("/api/tasks/task-1")
+        cancel_response = client.post("/api/tasks/task-1/cancel")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert status_response.status_code == 200
+    assert status_response.json()["stage"] == "queued"
+    assert cancel_response.status_code == 200
+    assert cancel_response.json()["stage"] == "cancelled"

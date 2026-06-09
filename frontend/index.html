@@ -48,6 +48,14 @@
             <button id="urlModeButton" class="input-tab" type="button">视频链接</button>
           </div>
 
+          <div class="task-progress" aria-live="polite">
+            <div class="task-progress-track"><span id="progressBar"></span></div>
+            <div class="task-progress-meta">
+              <span id="progressLabel">等待创建任务</span>
+              <button id="cancelTaskButton" type="button" hidden>取消任务</button>
+            </div>
+          </div>
+
           <div id="uploadZone" class="upload-zone">
             <input id="audioInput" type="file" accept=".mp3,.wav,.m4a,.mp4" hidden />
             <button id="pickFileButton" class="upload-icon" type="button" aria-label="选择音频">↑</button>
@@ -178,6 +186,6 @@
         </aside>
       </section>
     </main>
-    <script src="./app.js?v=20260608-5"></script>
+    <script src="./app.js?v=20260609-6"></script>
   </body>
 </html>

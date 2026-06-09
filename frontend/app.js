@@ -1,5 +1,5 @@
 const API_BASE_URL = "http://127.0.0.1:8010";
-const REQUIRED_API_VERSION = "0.3.0";
+const REQUIRED_API_VERSION = "0.4.0";
 const acceptedExtensions = [".mp3", ".wav", ".m4a", ".mp4"];
 const assistActions = ["explain", "conflict", "question", "catchup", "actions"];
 const assistActionLabels = {
@@ -30,10 +30,12 @@ const demoSegments = [
 let selectedFile = null;
 let latestResult = null;
 let inputMode = "file";
+let currentTaskId = null;
 
 const elements = {
   audioInput: document.querySelector("#audioInput"),
   browserCookieSelect: document.querySelector("#browserCookieSelect"),
+  cancelTaskButton: document.querySelector("#cancelTaskButton"),
   durationLabel: document.querySelector("#durationLabel"),
   errorMessage: document.querySelector("#errorMessage"),
   fileModeButton: document.querySelector("#fileModeButton"),
@@ -45,6 +47,8 @@ const elements = {
   noticeMessage: document.querySelector("#noticeMessage"),
   pickFileButton: document.querySelector("#pickFileButton"),
   providerStatus: document.querySelector("#providerStatus"),
+  progressBar: document.querySelector("#progressBar"),
+  progressLabel: document.querySelector("#progressLabel"),
   statusDot: document.querySelector("#statusDot"),
   statusText: document.querySelector("#statusText"),
   topicStatus: document.querySelector("#topicStatus"),
@@ -88,6 +92,56 @@ function setState(state) {
   } else {
     elements.transcribeButton.textContent = "选择音频";
     elements.urlTranscribeButton.textContent = "解析并转写";
+  }
+}
+
+function updateTaskProgress(task) {
+  const progress = Math.max(0, Math.min(100, Number(task.progress) || 0));
+  elements.progressBar.style.width = `${progress}%`;
+  elements.progressLabel.textContent = `${task.message || task.stage} · ${progress}%`;
+  elements.cancelTaskButton.hidden = ["completed", "failed", "cancelled"].includes(task.stage);
+  setState(["queued", "uploading", "downloading", "waiting_for_gpu"].includes(task.stage) ? "uploading" : "transcribing");
+}
+
+async function waitForTask(taskId) {
+  currentTaskId = taskId;
+  elements.cancelTaskButton.hidden = false;
+
+  while (currentTaskId === taskId) {
+    const response = await fetch(`${API_BASE_URL}/api/tasks/${taskId}`, { cache: "no-store" });
+    if (!response.ok) throw new Error("无法读取任务状态。");
+    const task = await response.json();
+    updateTaskProgress(task);
+
+    if (task.stage === "completed") {
+      const resultResponse = await fetch(`${API_BASE_URL}/api/tasks/${taskId}/result`, { cache: "no-store" });
+      if (!resultResponse.ok) throw new Error("任务已完成，但无法读取结果。");
+      currentTaskId = null;
+      elements.cancelTaskButton.hidden = true;
+      return resultResponse.json();
+    }
+    if (task.stage === "failed") {
+      currentTaskId = null;
+      throw new Error(task.error || "转写任务失败。");
+    }
+    if (task.stage === "cancelled") {
+      currentTaskId = null;
+      throw new Error("任务已取消。");
+    }
+
+    await new Promise((resolve) => window.setTimeout(resolve, 800));
+  }
+  throw new Error("任务已取消。");
+}
+
+async function cancelCurrentTask() {
+  if (!currentTaskId) return;
+  const taskId = currentTaskId;
+  elements.cancelTaskButton.disabled = true;
+  try {
+    await fetch(`${API_BASE_URL}/api/tasks/${taskId}/cancel`, { method: "POST" });
+  } finally {
+    elements.cancelTaskButton.disabled = false;
   }
 }
 
@@ -160,6 +214,9 @@ function selectFile(file) {
   showError("");
   showNotice("");
   setState("idle");
+  elements.progressBar.style.width = "0%";
+  elements.progressLabel.textContent = "等待创建任务";
+  elements.cancelTaskButton.hidden = true;
 
   elements.fileName.textContent = file.name;
   elements.fileMeta.textContent = `${(file.size / 1024 / 1024).toFixed(1)} MB · 已准备转写`;
@@ -171,7 +228,7 @@ async function transcribeAudio(file) {
   const body = new FormData();
   body.append("file", file);
 
-  const response = await fetch(`${API_BASE_URL}/api/transcribe`, {
+  const response = await fetch(`${API_BASE_URL}/api/tasks/transcribe`, {
     method: "POST",
     body,
   });
@@ -187,12 +244,13 @@ async function transcribeAudio(file) {
     throw new Error(message);
   }
 
-  return response.json();
+  const task = await response.json();
+  return waitForTask(task.task_id);
 }
 
 async function transcribeVideoUrl(url) {
   const browser = elements.browserCookieSelect.value || null;
-  const response = await fetch(`${API_BASE_URL}/api/transcribe-url`, {
+  const response = await fetch(`${API_BASE_URL}/api/tasks/transcribe-url`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -211,7 +269,8 @@ async function transcribeVideoUrl(url) {
     throw new Error(message);
   }
 
-  return response.json();
+  const task = await response.json();
+  return waitForTask(task.task_id);
 }
 
 async function requestAssistance(action) {
@@ -298,6 +357,7 @@ async function handleTranscribe() {
   showError("");
   showNotice("");
   setState("uploading");
+  elements.progressLabel.textContent = "正在创建任务…";
 
   try {
     window.setTimeout(() => setState("transcribing"), 300);
@@ -321,6 +381,7 @@ async function handleUrlTranscribe() {
   showError("");
   showNotice("");
   setState("uploading");
+  elements.progressLabel.textContent = "正在创建任务…";
 
   try {
     window.setTimeout(() => setState("transcribing"), 300);
@@ -334,6 +395,10 @@ async function handleUrlTranscribe() {
 }
 
 function setInputMode(nextMode) {
+  if (currentTaskId) {
+    showError("当前仍有任务运行，请先取消或等待任务完成。");
+    return;
+  }
   inputMode = nextMode;
   const isFileMode = inputMode === "file";
 
@@ -345,6 +410,9 @@ function setInputMode(nextMode) {
   showError("");
   showNotice("");
   setState("idle");
+  elements.progressBar.style.width = "0%";
+  elements.progressLabel.textContent = "等待创建任务";
+  elements.cancelTaskButton.hidden = true;
 }
 
 function renderTranscript(segments, isDemo) {
@@ -408,6 +476,7 @@ function renderResult(result) {
 elements.pickFileButton.addEventListener("click", () => elements.audioInput.click());
 elements.transcribeButton.addEventListener("click", handleTranscribe);
 elements.urlTranscribeButton.addEventListener("click", handleUrlTranscribe);
+elements.cancelTaskButton.addEventListener("click", cancelCurrentTask);
 elements.fileModeButton.addEventListener("click", () => setInputMode("file"));
 elements.urlModeButton.addEventListener("click", () => setInputMode("url"));
 elements.audioInput.addEventListener("change", (event) => {

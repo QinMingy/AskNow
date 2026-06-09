@@ -2,6 +2,7 @@ import logging
 import time
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
+from typing import Callable
 
 from fastapi import HTTPException, UploadFile, status
 
@@ -11,6 +12,13 @@ from .schemas import SourceMetadata, TranscriptSegment, TranscriptionResponse
 from .sources.registry import SourceRegistry
 
 logger = logging.getLogger(__name__)
+
+ProgressCallback = Callable[[str, int, str], None]
+CancelCheck = Callable[[], bool]
+
+
+class TranscriptionCancelled(Exception):
+    pass
 
 
 class WhisperTranscriber:
@@ -116,7 +124,13 @@ class WhisperTranscriber:
             )
             return response
 
-    def _transcribe_path(self, audio_path: Path) -> TranscriptionResponse:
+    def transcribe_path(
+        self,
+        audio_path: Path,
+        *,
+        progress: ProgressCallback | None = None,
+        cancel_check: CancelCheck | None = None,
+    ) -> TranscriptionResponse:
         model = self._load_model()
 
         started = time.perf_counter()
@@ -127,6 +141,8 @@ class WhisperTranscriber:
             audio_path.stat().st_size,
         )
         try:
+            if progress:
+                progress("transcribing", 25, "Transcribing audio")
             segments_iter, info = model.transcribe(
                 str(audio_path),
                 language="zh",
@@ -135,6 +151,8 @@ class WhisperTranscriber:
             )
             segments = []
             for idx, segment in enumerate(segments_iter, start=1):
+                if cancel_check and cancel_check():
+                    raise TranscriptionCancelled()
                 segments.append(
                     TranscriptSegment(
                         id=idx,
@@ -144,6 +162,14 @@ class WhisperTranscriber:
                         text=segment.text.strip(),
                     )
                 )
+                duration_hint = float(getattr(info, "duration", 0.0) or 0.0)
+                if progress and duration_hint > 0:
+                    fraction = min(1.0, float(segment.end) / duration_hint)
+                    progress(
+                        "transcribing",
+                        25 + int(fraction * 50),
+                        f"Transcribed {idx} segments",
+                    )
             whisper_elapsed_ms = (time.perf_counter() - started) * 1000
             logger.info(
                 "whisper.inference.complete segments=%s elapsed_ms=%.1f",
@@ -151,6 +177,10 @@ class WhisperTranscriber:
                 whisper_elapsed_ms,
             )
             diarization_started = time.perf_counter()
+            if cancel_check and cancel_check():
+                raise TranscriptionCancelled()
+            if progress:
+                progress("diarizing", 78, "Identifying speakers")
             logger.info(
                 "diarization.start provider=%s segments=%s",
                 self.diarizer.name,
@@ -163,8 +193,13 @@ class WhisperTranscriber:
                 len({segment.speaker for segment in segments}),
                 (time.perf_counter() - diarization_started) * 1000,
             )
+            if progress:
+                progress("diarizing", 95, "Speaker identification complete")
         except HTTPException:
             logger.exception("transcription.pipeline.failed")
+            raise
+        except TranscriptionCancelled:
+            logger.info("transcription.pipeline.cancelled")
             raise
         except Exception as exc:
             logger.exception("transcription.pipeline.failed")
@@ -187,3 +222,5 @@ class WhisperTranscriber:
             duration=round(duration, 2),
             segments=segments,
         )
+
+    _transcribe_path = transcribe_path

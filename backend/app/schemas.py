@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel
@@ -27,6 +28,38 @@ class TranscriptionResponse(BaseModel):
 class VideoUrlRequest(BaseModel):
     url: str
     browser: Literal["edge", "chrome", "firefox"] | None = None
+
+
+TaskStage = Literal[
+    "queued",
+    "uploading",
+    "downloading",
+    "waiting_for_gpu",
+    "transcribing",
+    "diarizing",
+    "completed",
+    "failed",
+    "cancelled",
+]
+
+
+class TaskCreatedResponse(BaseModel):
+    task_id: str
+    status_url: str
+    result_url: str
+
+
+class TaskStatusResponse(BaseModel):
+    task_id: str
+    stage: TaskStage
+    progress: int
+    message: str
+    cancel_requested: bool
+    created_at: datetime
+    updated_at: datetime
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    error: str | None = None
 
 
 AssistAction = Literal[

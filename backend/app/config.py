@@ -19,6 +19,9 @@ class Settings(BaseModel):
     assist_model: str | None = "deepseek-v4-flash"
     assist_api_key: str | None = None
     assist_timeout_seconds: float = 60.0
+    task_worker_count: int = 4
+    gpu_task_concurrency: int = 1
+    task_retention_seconds: int = 3600
     ytdlp_cookies_file: str | None = None
     ytdlp_user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -50,6 +53,9 @@ def get_settings() -> Settings:
         assist_model=os.getenv("ASSIST_MODEL", "deepseek-v4-flash"),
         assist_api_key=os.getenv("ASSIST_API_KEY") or os.getenv("DEEPSEEK_API_KEY"),
         assist_timeout_seconds=float(os.getenv("ASSIST_TIMEOUT_SECONDS", "60")),
+        task_worker_count=int(os.getenv("TASK_WORKER_COUNT", "4")),
+        gpu_task_concurrency=int(os.getenv("GPU_TASK_CONCURRENCY", "1")),
+        task_retention_seconds=int(os.getenv("TASK_RETENTION_SECONDS", "3600")),
         ytdlp_cookies_file=os.getenv("YTDLP_COOKIES_FILE"),
         ytdlp_user_agent=os.getenv(
             "YTDLP_USER_AGENT",
