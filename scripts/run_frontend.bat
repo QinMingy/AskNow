@@ -1,5 +1,6 @@
 @echo off
 setlocal
+title Classroom Assistant Frontend
 
 set "ROOT=%~dp0.."
 set "FRONTEND_DIR=%ROOT%\frontend"

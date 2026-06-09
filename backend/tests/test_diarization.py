@@ -82,7 +82,7 @@ def test_pyannote_requires_token_before_loading_pipeline():
         diarizer._load_pipeline()
 
     assert exc_info.value.status_code == 503
-    assert "HF_TOKEN" in exc_info.value.detail
+    assert "HUGGINGFACE_API_KEY" in exc_info.value.detail
 
 
 def test_diarizer_factory_selects_provider():

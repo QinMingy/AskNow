@@ -27,9 +27,10 @@ class PyannoteDiarizer:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=(
-                    "Pyannote speaker diarization requires HF_TOKEN. Accept access for "
+                    "Pyannote speaker diarization requires a Hugging Face token. "
+                    "Accept access for "
                     "`pyannote/segmentation-3.0` and `pyannote/speaker-diarization-3.1`, "
-                    "then set the HF_TOKEN environment variable."
+                    "then set the HUGGINGFACE_API_KEY environment variable."
                 ),
             )
 
@@ -52,8 +53,9 @@ class PyannoteDiarizer:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=(
-                    "Unable to initialize pyannote speaker diarization. Verify HF_TOKEN, "
-                    "accepted model conditions, network access, and GPU environment. "
+                    "Unable to initialize pyannote speaker diarization. Verify "
+                    "HUGGINGFACE_API_KEY, accepted model conditions, network access, "
+                    "and GPU environment. "
                     f"Original error: {exc}"
                 ),
             ) from exc

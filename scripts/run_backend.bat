@@ -1,5 +1,6 @@
 @echo off
 setlocal
+title Classroom Assistant Backend
 
 set "ROOT=%~dp0.."
 set "BACKEND_DIR=%ROOT%\backend"
