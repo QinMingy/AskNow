@@ -3,6 +3,9 @@ const REQUIRED_API_VERSION = "0.9.0";
 const STREAM_CHUNK_DURATION_MS = 200;
 const STREAM_TARGET_SAMPLE_RATE = 16000;
 const STREAM_STOP_FLUSH_TIMEOUT_MS = 30000;
+const LIVE_RENDER_INTERVAL_MS = 250;
+const LIVE_TURN_GAP_SECONDS = 1.2;
+const LIVE_TURN_MAX_SECONDS = 8;
 const acceptedExtensions = [".mp3", ".wav", ".m4a", ".mp4"];
 const assistActionLabels = {
   explain: "解释刚刚发生了什么",
@@ -62,6 +65,7 @@ let livePendingChunks = [];
 let livePendingMs = 0;
 let liveInFlightChunk = null;
 let liveDrainTimer = null;
+let liveRenderTimer = null;
 
 const elements = {
   audioInput: document.querySelector("#audioInput"),
@@ -564,12 +568,16 @@ function updateLiveSessionStatus(session) {
   liveCanSend = !["degraded", "full"].includes(session.backpressure);
   elements.liveBackpressure.classList.toggle("is-warning", !liveCanSend);
   elements.liveHint.textContent = liveCanSend
-    ? "麦克风音频正在本机处理，可修订字幕会在稳定后自动确认。"
+    ? "麦克风音频正在本机处理；单麦克风中的多人声音统一标记为“多人混合”，不会猜测身份。"
     : "服务端处理积压，未发送音频正在本地排队，不会直接丢弃。";
   scheduleLiveQueueDrain();
 }
 
 function mergeLiveSegments(finalSegments = [], partialSegments = null) {
+  const finalizedIds = new Set(finalSegments.map((segment) => segment.id));
+  if (finalizedIds.size) {
+    livePartialSegments = livePartialSegments.filter((segment) => !finalizedIds.has(segment.id));
+  }
   finalSegments.forEach((segment) => {
     const index = liveFinalSegments.findIndex((item) => item.id === segment.id);
     if (index >= 0) liveFinalSegments[index] = segment;
@@ -582,7 +590,94 @@ function mergeLiveSegments(finalSegments = [], partialSegments = null) {
     duration: Math.max(0, ...[...liveFinalSegments, ...livePartialSegments].map((segment) => segment.end || 0)),
     segments: [...liveFinalSegments, ...livePartialSegments],
   };
-  renderLiveTranscript();
+  scheduleLiveTranscriptRender();
+}
+
+function scheduleLiveTranscriptRender({ immediate = false } = {}) {
+  window.clearTimeout(liveRenderTimer);
+  liveRenderTimer = window.setTimeout(renderLiveTranscript, immediate ? 0 : LIVE_RENDER_INTERVAL_MS);
+}
+
+function liveSpeakerLabel(speaker) {
+  return speaker === "Mixed speakers" || speaker === "Unknown" ? "多人混合" : speaker;
+}
+
+function buildLiveDisplaySegments(segments) {
+  return segments.reduce((turns, segment) => {
+    const normalized = { ...segment, speaker: liveSpeakerLabel(segment.speaker) };
+    const previous = turns[turns.length - 1];
+    const canMerge = previous
+      && previous.speaker === normalized.speaker
+      && normalized.start - previous.end <= LIVE_TURN_GAP_SECONDS
+      && normalized.end - previous.start <= LIVE_TURN_MAX_SECONDS
+      && previous.final !== false
+      && normalized.final !== false;
+    if (!canMerge) {
+      turns.push({ ...normalized, displayId: String(normalized.id) });
+      return turns;
+    }
+    previous.end = normalized.end;
+    const separator = /[a-z0-9]$/i.test(previous.text) && /^[a-z0-9]/i.test(normalized.text)
+      ? " "
+      : "";
+    previous.text += `${separator}${normalized.text}`;
+    return turns;
+  }, []);
+}
+
+function createTranscriptItem(segment) {
+  const item = document.createElement("div");
+  item.className = "transcript-item";
+  const meta = document.createElement("div");
+  meta.className = "transcript-meta";
+  const time = document.createElement("span");
+  time.dataset.role = "time";
+  const speaker = document.createElement("span");
+  speaker.dataset.role = "speaker";
+  const text = document.createElement("p");
+  text.dataset.role = "text";
+  meta.append(time, speaker);
+  item.append(meta, text);
+  updateTranscriptItem(item, segment);
+  return item;
+}
+
+function updateTranscriptItem(item, segment) {
+  item.classList.toggle("transcript-partial", segment.final === false);
+  item.querySelector('[data-role="time"]').textContent = formatTimestamp(segment.start);
+  const speaker = item.querySelector('[data-role="speaker"]');
+  speaker.className = `speaker-chip ${String(segment.speaker).endsWith("B") ? "speaker-b" : ""} ${segment.speaker === "多人混合" ? "speaker-mixed" : ""}`;
+  speaker.textContent = segment.speaker;
+  const text = item.querySelector('[data-role="text"]');
+  if (text.textContent !== segment.text) text.textContent = segment.text;
+}
+
+function reconcileLiveTranscript(segments) {
+  const wasNearBottom = elements.transcriptList.scrollHeight
+    - elements.transcriptList.scrollTop
+    - elements.transcriptList.clientHeight < 48;
+  const existing = new Map(
+    [...elements.transcriptList.querySelectorAll("[data-live-segment-id]")]
+      .map((item) => [item.dataset.liveSegmentId, item]),
+  );
+  const keep = new Set();
+  segments.forEach((segment) => {
+    const id = segment.displayId;
+    keep.add(id);
+    let item = existing.get(id);
+    if (!item) {
+      item = createTranscriptItem(segment);
+      item.dataset.liveSegmentId = id;
+      elements.transcriptList.append(item);
+    } else {
+      updateTranscriptItem(item, segment);
+    }
+  });
+  existing.forEach((item, id) => {
+    if (!keep.has(id)) item.remove();
+  });
+  elements.transcriptList.querySelector(".live-empty")?.remove();
+  if (wasNearBottom) elements.transcriptList.scrollTop = elements.transcriptList.scrollHeight;
 }
 
 function handleLiveEvent(event) {
@@ -626,6 +721,8 @@ async function startLiveSession() {
   livePendingChunks = [];
   livePendingMs = 0;
   liveInFlightChunk = null;
+  window.clearTimeout(liveRenderTimer);
+  liveRenderTimer = null;
   renderLiveTranscript();
   elements.startLiveButton.disabled = true;
   elements.liveStatus.textContent = "正在请求麦克风权限";
@@ -795,6 +892,8 @@ function setInputMode(nextMode) {
     showError("当前仍有任务运行，请先结束或等待任务完成。");
     return;
   }
+  window.clearTimeout(liveRenderTimer);
+  liveRenderTimer = null;
   inputMode = nextMode;
   const isFileMode = inputMode === "file";
   const isUrlMode = inputMode === "url";
@@ -833,41 +932,27 @@ function renderTranscript(segments, isDemo) {
   }
 
   segments.forEach((segment) => {
-    const item = document.createElement("div");
-    item.className = `transcript-item ${segment.final === false ? "transcript-partial" : ""}`;
-
-    const meta = document.createElement("div");
-    meta.className = "transcript-meta";
-
-    const time = document.createElement("span");
-    time.textContent = formatTimestamp(segment.start);
-
-    const speaker = document.createElement("span");
-    speaker.className = `speaker-chip ${String(segment.speaker).endsWith("B") ? "speaker-b" : ""}`;
-    speaker.textContent = segment.speaker;
-
-    const text = document.createElement("p");
-    text.textContent = segment.text;
-
-    meta.append(time, speaker);
-    item.append(meta, text);
-    elements.transcriptList.append(item);
+    elements.transcriptList.append(createTranscriptItem(segment));
   });
 }
 
 function renderLiveTranscript() {
-  const segments = [...liveFinalSegments, ...livePartialSegments].sort((left, right) => left.start - right.start);
+  liveRenderTimer = null;
+  const segments = buildLiveDisplaySegments(
+    [...liveFinalSegments, ...livePartialSegments].sort((left, right) => left.start - right.start),
+  );
   if (!segments.length) {
-    elements.transcriptList.innerHTML = `
-      <div class="live-empty">
-        <span class="live-empty-wave">••••</span>
-        <strong>实时字幕会出现在这里</strong>
-        <p>可修订字幕会以浅色显示，稳定后自动变为已确认字幕。</p>
-      </div>
-    `;
+    if (!elements.transcriptList.querySelector(".live-empty")) {
+      elements.transcriptList.innerHTML = `
+        <div class="live-empty">
+          <span class="live-empty-wave">••••</span>
+          <strong>实时字幕会出现在这里</strong>
+          <p>单麦克风会将多人声音标记为“多人混合”，不会猜测发言身份。</p>
+        </div>
+      `;
+    }
   } else {
-    renderTranscript(segments, false);
-    elements.transcriptList.scrollTop = elements.transcriptList.scrollHeight;
+    reconcileLiveTranscript(segments);
   }
   const context = segments.slice(-3).map((segment) => segment.text).join(" ");
   elements.focusTitle.textContent = context ? "实时讨论焦点" : "等待讨论开始";

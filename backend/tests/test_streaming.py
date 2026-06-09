@@ -481,6 +481,7 @@ def test_funasr_stream_processor_uses_raw_pcm_and_per_session_cache():
     )
 
     assert segments[0].text == "实时识别"
+    assert segments[0].speaker == "Mixed speakers"
     assert calls[0]["input"].shape == (3200,)
     assert calls[0]["chunk_size"] == [0, 10, 5]
     assert first_state.cache == {"seen": True}

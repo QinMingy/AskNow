@@ -41,8 +41,9 @@ may not contain the headers needed for independent decoding.
 - ScriptProcessorNode is broadly supported but deprecated. A future iteration
   should move sample collection into an AudioWorklet.
 - The local queue is memory-backed and has no reconnect persistence yet.
-- Incremental speaker diarization is not enabled. Live subtitles use
-  `Unknown` until a later speaker revision stage.
+- Incremental speaker diarization is not enabled. A single microphone is a
+  mixed mono source, so live subtitles use `Mixed speakers` instead of
+  inventing Speaker A/B identities. A later diarization stage may revise them.
 - Browsers may apply echo cancellation and noise suppression differently.
 
 ## Next Step

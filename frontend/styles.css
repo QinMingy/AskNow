@@ -707,6 +707,11 @@ h1 {
   background: #f2e2da;
 }
 
+.speaker-chip.speaker-mixed {
+  color: #6a5848;
+  background: #eee7dc;
+}
+
 .transcript-item p {
   margin-bottom: 0;
   color: #34453f;

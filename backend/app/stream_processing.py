@@ -37,6 +37,7 @@ class FunASRSessionState:
 
 class FunASRStreamProcessor:
     incremental = True
+    speaker_label = "Mixed speakers"
 
     def __init__(
         self,
@@ -109,7 +110,7 @@ class FunASRStreamProcessor:
                 id=index,
                 start=0.0,
                 end=duration,
-                speaker="Unknown",
+                speaker=self.speaker_label,
                 text=text,
             )
             for index, text in enumerate(texts, start=1)
