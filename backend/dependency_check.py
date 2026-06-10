@@ -11,6 +11,10 @@ from contextlib import redirect_stderr, redirect_stdout
 from collections.abc import Callable, Iterable
 from typing import TextIO
 
+from app.env import load_project_env
+
+load_project_env()
+
 
 DEPENDENCIES = (
     ("requests", "Requests"),
@@ -28,6 +32,7 @@ def configured_dependencies() -> tuple[tuple[str, str], ...]:
     dependencies = [
         ("requests", "Requests"),
         ("httpx", "HTTPX"),
+        ("dotenv", "python-dotenv"),
         ("yt_dlp", "yt-dlp"),
         ("uvicorn", "Uvicorn"),
     ]

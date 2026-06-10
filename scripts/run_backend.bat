@@ -13,16 +13,7 @@ echo Backend: http://127.0.0.1:8010
 echo Press Ctrl+C to stop this service.
 echo.
 
-if not defined DEEPSEEK_API_KEY if not defined ASSIST_API_KEY (
-  echo [INFO] DEEPSEEK_API_KEY is not set. Transcription will work, but the default LiteLLM assist provider will not be ready.
-  echo.
-)
-
-if not defined HUGGINGFACE_API_KEY if not defined HF_TOKEN if not defined HUGGINGFACE_ACCESS_TOKEN (
-  echo [WARNING] A Hugging Face token is not set. The default pyannote speaker diarization provider cannot download its gated model.
-  echo           Accept both pyannote model conditions and set HUGGINGFACE_API_KEY, or explicitly set DIARIZATION_PROVIDER=mock.
-  echo.
-)
+"%ENV_PYTHON%" -c "from app.config import get_settings; s=get_settings(); print('[INFO] DeepSeek/assist API key is not set. Transcription will work, but LiteLLM assist is not ready.' if not s.assist_api_key else ''); print('[WARNING] A Hugging Face token is not set. Pyannote cannot download its gated model.' if s.diarization_provider.lower() == 'pyannote' and not s.huggingface_token else '')"
 
 "%ENV_PYTHON%" -c "import faster_whisper, requests, yt_dlp, torch, torchaudio, pyannote.audio" >nul 2>nul
 if errorlevel 1 (

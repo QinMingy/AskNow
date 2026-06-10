@@ -42,6 +42,10 @@ The live microphone path can also connect directly to Volcengine Doubao
 streaming big-model ASR through a session-level native WebSocket provider. Set
 `STREAM_PROCESSOR=volcengine` and see `docs/VOLCENGINE_STREAM_ASR_GUIDE.md`.
 
+Local secrets and provider settings can be stored in the ignored repository
+`.env` file. Process and system environment variables remain supported and take
+precedence. See `docs/ENV_CONFIGURATION_GUIDE.md`.
+
 课堂/会议中的实时理解无障碍助手第一阶段 Demo。
 
 这个项目不是普通会议纪要工具。第一阶段先完成一个本地 Web Demo：上传课堂/会议录音，或粘贴 B 站、YouTube 视频链接后，系统使用本地 `faster-whisper` 进行转写，并在三栏界面里展示字幕、时间戳、模拟说话人和后续 AI 辅助入口。

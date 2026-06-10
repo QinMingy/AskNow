@@ -6,6 +6,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "backend"))
+
+from app.env import load_project_env
+
+load_project_env()
+
 
 def check_python_package(package: str) -> str:
     return "ok" if importlib.util.find_spec(package) else "missing"

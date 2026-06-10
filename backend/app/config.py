@@ -3,6 +3,10 @@ from functools import lru_cache
 
 from pydantic import BaseModel
 
+from .env import load_project_env
+
+load_project_env()
+
 
 class Settings(BaseModel):
     app_name: str = "Classroom Comprehension Assistant"
