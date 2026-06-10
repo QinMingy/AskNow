@@ -24,8 +24,6 @@ class Settings(BaseModel):
     diarization_api_base_url: str | None = None
     diarization_api_key: str | None = None
     diarization_api_timeout_seconds: float = 600.0
-    diarization_load_max_attempts: int = 3
-    diarization_load_retry_backoff_seconds: float = 2.0
     huggingface_token: str | None = None
     assist_provider: str = "litellm"
     assist_base_url: str | None = "https://api.deepseek.com/v1"
@@ -101,12 +99,6 @@ def get_settings() -> Settings:
         diarization_api_key=os.getenv("DIARIZATION_API_KEY") or model_api_key,
         diarization_api_timeout_seconds=float(
             os.getenv("DIARIZATION_API_TIMEOUT_SECONDS", "600")
-        ),
-        diarization_load_max_attempts=int(
-            os.getenv("DIARIZATION_LOAD_MAX_ATTEMPTS", "3")
-        ),
-        diarization_load_retry_backoff_seconds=float(
-            os.getenv("DIARIZATION_LOAD_RETRY_BACKOFF_SECONDS", "2")
         ),
         huggingface_token=(
             os.getenv("HUGGINGFACE_API_KEY")

@@ -42,9 +42,9 @@ The live microphone path can also connect directly to Volcengine Doubao
 streaming big-model ASR through a session-level native WebSocket provider. Set
 `STREAM_PROCESSOR=volcengine` and see `docs/VOLCENGINE_STREAM_ASR_GUIDE.md`.
 
-Local secrets and provider settings can be stored in the ignored repository
-`.env` file. Process and system environment variables remain supported and take
-precedence. See `docs/ENV_CONFIGURATION_GUIDE.md`.
+Third-party service information can be stored in the ignored repository `.env`
+file. Internal AskNow runtime settings remain code defaults. See
+`docs/ENV_CONFIGURATION_GUIDE.md`.
 
 课堂/会议中的实时理解无障碍助手第一阶段 Demo。
 

@@ -32,9 +32,11 @@ cd C:\Users\qinmy\Documents\WhisperProject
 .\start_demo.bat
 ```
 
-The same values can be written to the repository-root `.env` file without the
-PowerShell `$env:` prefix. Existing system or terminal variables take
-precedence over `.env`.
+`VOLCENGINE_APP_ID`, `VOLCENGINE_ACCESS_TOKEN`, and
+`VOLCENGINE_RESOURCE_ID` can be stored together in the repository-root `.env`
+file because they all describe the third-party Volcengine integration.
+`STREAM_PROCESSOR` is an internal AskNow runtime setting and remains a code
+default.
 
 The default resource ID is `volc.bigasr.sauc.duration`. If the Volcengine
 console shows a different resource ID for the activated billing mode, use the

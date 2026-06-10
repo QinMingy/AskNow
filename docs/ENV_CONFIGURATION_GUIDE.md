@@ -1,53 +1,46 @@
-# `.env` Configuration Guide
+# `.env` Third-Party Integration Guide
 
-AskNow loads local configuration from the repository-root `.env` file.
-Operating-system, terminal, container, and cloud-platform environment variables
-remain supported.
+AskNow loads third-party integration information from the repository-root
+`.env` file. This includes API keys, access tokens, App IDs, Resource IDs,
+third-party API URLs, and provider model identifiers. Internal AskNow runtime
+configuration in `.env` is ignored.
 
-Configuration priority:
+Third-party value priority:
 
 ```text
-process/system environment variable > repository .env > code default
+process/system value > repository .env value > code default
 ```
 
-This means a cloud deployment can inject secrets normally, while local
-development can keep them together in one ignored file.
+Provider selection, worker counts, timeouts, retry policies, buffer sizes, and
+other internal runtime settings use code defaults.
 
 ## Local setup
 
 The repository includes `.env.example`. Copy its values into the ignored
-`.env` file and fill only the providers you use:
+`.env` file and fill only the services you use:
 
 ```dotenv
 DEEPSEEK_API_KEY=
 HUGGINGFACE_API_KEY=
-
-# Enable after filling the Volcengine credentials.
-STREAM_PROCESSOR=volcengine
-VOLCENGINE_APP_ID=
 VOLCENGINE_ACCESS_TOKEN=
+VOLCENGINE_APP_ID=
 VOLCENGINE_RESOURCE_ID=volc.bigasr.sauc.duration
+MODEL_API_KEY=
 ```
 
-Run `start_demo.bat` normally after editing `.env`. No PowerShell `$env:...`
-commands are required.
+Run `start_demo.bat` normally after editing `.env`.
 
-## Environment-variable compatibility
+## Internal runtime configuration
 
-Existing variables are not overwritten by `.env`. For example:
-
-```powershell
-$env:STREAM_PROCESSOR="funasr"
-.\start_demo.bat
-```
-
-Even if `.env` contains `STREAM_PROCESSOR=volcengine`, the terminal value
-`funasr` wins for that process.
+Internal values such as `STREAM_PROCESSOR`, worker counts, backpressure
+thresholds, and retry policies are not loaded from `.env`. They remain code
+defaults so the local third-party configuration file stays focused.
 
 ## Security
 
 - `.env` is ignored by Git and must remain local.
-- `.env.example` contains names and non-secret defaults only.
+- `.env.example` contains third-party field names and non-secret defaults,
+  never secret values.
 - Never place real tokens in `.env.example`, documentation, commits, or chat.
 - Cloud deployments should use the platform's secret/environment-variable
   manager instead of copying the local `.env` file.

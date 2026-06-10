@@ -87,16 +87,3 @@ def test_huggingface_api_key_is_preferred(monkeypatch):
         assert get_settings().huggingface_token == "primary-token"
     finally:
         get_settings.cache_clear()
-
-
-def test_diarization_load_retry_configuration(monkeypatch):
-    monkeypatch.setenv("DIARIZATION_LOAD_MAX_ATTEMPTS", "5")
-    monkeypatch.setenv("DIARIZATION_LOAD_RETRY_BACKOFF_SECONDS", "1.5")
-    get_settings.cache_clear()
-
-    try:
-        settings = get_settings()
-        assert settings.diarization_load_max_attempts == 5
-        assert settings.diarization_load_retry_backoff_seconds == 1.5
-    finally:
-        get_settings.cache_clear()
