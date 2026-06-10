@@ -118,6 +118,78 @@ def test_pyannote_requires_token_before_loading_pipeline():
     assert "HUGGINGFACE_API_KEY" in exc_info.value.detail
 
 
+def test_pyannote_retries_transient_network_disconnect():
+    calls = []
+    sleeps = []
+
+    class Pipeline:
+        def to(self, device):
+            self.device = device
+
+    def factory(model, token):
+        calls.append((model, token))
+        if len(calls) < 3:
+            raise RuntimeError("Server disconnected without sending a response.")
+        return Pipeline()
+
+    diarizer = PyannoteDiarizer(
+        "model",
+        token="token",
+        pipeline_factory=factory,
+        load_max_attempts=3,
+        load_retry_backoff_seconds=0.5,
+        sleep_func=sleeps.append,
+    )
+
+    pipeline = diarizer._load_pipeline()
+
+    assert len(calls) == 3
+    assert sleeps == [0.5, 1.0]
+    assert pipeline.device.type == "cuda"
+    assert diarizer._load_pipeline() is pipeline
+
+
+def test_pyannote_does_not_retry_non_network_model_error():
+    calls = []
+
+    def factory(model, token):
+        calls.append((model, token))
+        raise RuntimeError("403 Client Error: access denied")
+
+    diarizer = PyannoteDiarizer(
+        "model",
+        token="token",
+        pipeline_factory=factory,
+        load_max_attempts=3,
+        sleep_func=lambda _: pytest.fail("non-network errors must not retry"),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        diarizer._load_pipeline()
+
+    assert len(calls) == 1
+    assert exc_info.value.status_code == 503
+    assert "403 Client Error" in exc_info.value.detail
+
+
+def test_pyannote_network_failure_reports_retry_guidance():
+    diarizer = PyannoteDiarizer(
+        "model",
+        token="token",
+        pipeline_factory=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("Server disconnected without sending a response.")
+        ),
+        load_max_attempts=2,
+        load_retry_backoff_seconds=0,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        diarizer._load_pipeline()
+
+    assert "after 2 network attempts" in exc_info.value.detail
+    assert "HF_HUB_DOWNLOAD_TIMEOUT=120" in exc_info.value.detail
+
+
 def test_diarizer_factory_selects_provider():
     assert isinstance(
         create_diarizer("mock", model="model", token=None, device="cuda"),

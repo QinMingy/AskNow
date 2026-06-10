@@ -14,6 +14,8 @@ def create_diarizer(
     api_base_url: str | None = None,
     api_key: str | None = None,
     api_timeout_seconds: float = 600.0,
+    load_max_attempts: int = 3,
+    load_retry_backoff_seconds: float = 2.0,
 ) -> Diarizer:
     normalized = provider.strip().lower().replace("-", "_")
     if normalized in {"mock", "simulated"}:
@@ -21,7 +23,13 @@ def create_diarizer(
     if normalized in {"none", "off", "disabled", "passthrough"}:
         return PassthroughDiarizer()
     if normalized in {"pyannote", "speaker_diarization_3_1"}:
-        return PyannoteDiarizer(model=model, token=token, device=device)
+        return PyannoteDiarizer(
+            model=model,
+            token=token,
+            device=device,
+            load_max_attempts=load_max_attempts,
+            load_retry_backoff_seconds=load_retry_backoff_seconds,
+        )
     if normalized in {"api", "remote"}:
         return ApiDiarizer(
             RemoteModelClient(

@@ -1,6 +1,7 @@
 import logging
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -22,12 +23,21 @@ class PyannoteDiarizer:
         device: str = "cuda",
         pipeline=None,
         audio_loader=None,
+        pipeline_factory=None,
+        load_max_attempts: int = 3,
+        load_retry_backoff_seconds: float = 2.0,
+        sleep_func=time.sleep,
     ):
         self.model = model
         self.token = token
         self.device = device
         self._pipeline = pipeline
         self._audio_loader = audio_loader
+        self._pipeline_factory = pipeline_factory
+        self.load_max_attempts = max(1, load_max_attempts)
+        self.load_retry_backoff_seconds = max(0.0, load_retry_backoff_seconds)
+        self._sleep = sleep_func
+        self._pipeline_lock = threading.Lock()
 
     def _load_pipeline(self):
         if self._pipeline is not None:
@@ -43,45 +53,130 @@ class PyannoteDiarizer:
                 ),
             )
 
-        started = time.perf_counter()
-        logger.info(
-            "pyannote.model_load.start model=%s device=%s",
-            self.model,
-            self.device,
-        )
-        try:
-            import torch
+        with self._pipeline_lock:
+            if self._pipeline is not None:
+                return self._pipeline
+            started = time.perf_counter()
+            logger.info(
+                "pyannote.model_load.start model=%s device=%s max_attempts=%s",
+                self.model,
+                self.device,
+                self.load_max_attempts,
+            )
+            last_error = None
+            for attempt in range(1, self.load_max_attempts + 1):
+                try:
+                    self._pipeline = self._create_pipeline()
+                    break
+                except HTTPException:
+                    raise
+                except Exception as exc:
+                    last_error = exc
+                    retryable = self._is_retryable_network_error(exc)
+                    logger.warning(
+                        "pyannote.model_load.attempt_failed model=%s attempt=%s/%s retryable=%s error_type=%s error=%s",
+                        self.model,
+                        attempt,
+                        self.load_max_attempts,
+                        retryable,
+                        type(exc).__name__,
+                        exc,
+                    )
+                    if not retryable or attempt >= self.load_max_attempts:
+                        break
+                    delay = self.load_retry_backoff_seconds * attempt
+                    logger.info(
+                        "pyannote.model_load.retry model=%s next_attempt=%s delay_seconds=%.1f",
+                        self.model,
+                        attempt + 1,
+                        delay,
+                    )
+                    self._sleep(delay)
+
+            if self._pipeline is None:
+                logger.exception(
+                    "pyannote.model_load.failed model=%s attempts=%s",
+                    self.model,
+                    self.load_max_attempts,
+                    exc_info=last_error,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=self._load_error_detail(last_error),
+                ) from last_error
+
+            logger.info(
+                "pyannote.model_load.complete model=%s elapsed_ms=%.1f",
+                self.model,
+                (time.perf_counter() - started) * 1000,
+            )
+        return self._pipeline
+
+    def _create_pipeline(self):
+        import torch
+
+        if self._pipeline_factory is None:
             from pyannote.audio import Pipeline
 
-            self._pipeline = Pipeline.from_pretrained(
-                self.model,
-                token=self.token,
+            self._pipeline_factory = Pipeline.from_pretrained
+        pipeline = self._pipeline_factory(self.model, token=self.token)
+        if pipeline is None:
+            raise RuntimeError(
+                "Pipeline download returned no model. Verify gated-model access."
             )
-            if self._pipeline is None:
-                raise RuntimeError(
-                    "Pipeline download returned no model. Verify gated-model access."
-                )
-            self._pipeline.to(torch.device(self.device))
-        except HTTPException:
-            raise
-        except Exception as exc:
-            logger.exception("pyannote.model_load.failed model=%s", self.model)
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=(
-                    "Unable to initialize pyannote speaker diarization. Verify "
-                    "HUGGINGFACE_API_KEY, accepted model conditions, network access, "
-                    "and GPU environment. "
-                    f"Original error: {exc}"
-                ),
-            ) from exc
+        pipeline.to(torch.device(self.device))
+        return pipeline
 
-        logger.info(
-            "pyannote.model_load.complete model=%s elapsed_ms=%.1f",
-            self.model,
-            (time.perf_counter() - started) * 1000,
+    @staticmethod
+    def _is_retryable_network_error(exc: Exception) -> bool:
+        retryable_names = {
+            "ConnectError",
+            "ConnectionError",
+            "ConnectionResetError",
+            "ConnectTimeout",
+            "ReadError",
+            "ReadTimeout",
+            "RemoteProtocolError",
+            "ServerDisconnectedError",
+            "TimeoutError",
+        }
+        retryable_messages = (
+            "server disconnected",
+            "connection reset",
+            "connection aborted",
+            "connection refused",
+            "connection timed out",
+            "read timed out",
+            "temporary failure",
+            "temporarily unavailable",
+            "remote protocol error",
         )
-        return self._pipeline
+        current: BaseException | None = exc
+        while current is not None:
+            if type(current).__name__ in retryable_names:
+                return True
+            message = str(current).lower()
+            if any(pattern in message for pattern in retryable_messages):
+                return True
+            current = current.__cause__ or current.__context__
+        return False
+
+    def _load_error_detail(self, exc: Exception | None) -> str:
+        if exc is not None and self._is_retryable_network_error(exc):
+            return (
+                "Unable to initialize pyannote speaker diarization after "
+                f"{self.load_max_attempts} network attempts. The model cache exists, "
+                "but Hugging Face disconnected while the pipeline checked or fetched "
+                "model files. Retry later, verify network/proxy access to huggingface.co, "
+                "or set HF_HUB_DOWNLOAD_TIMEOUT=120. "
+                f"Original error: {exc}"
+            )
+        return (
+            "Unable to initialize pyannote speaker diarization. Verify "
+            "HUGGINGFACE_API_KEY, accepted model conditions, network access, "
+            "and GPU environment. "
+            f"Original error: {exc}"
+        )
 
     def _load_audio(self, audio_path: Path) -> dict:
         if self._audio_loader is not None:

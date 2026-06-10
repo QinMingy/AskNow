@@ -31,6 +31,20 @@ $env:HUGGINGFACE_API_KEY="hf_your_read_token"
 The first transcription downloads the gated model into the Hugging Face cache.
 Later runs use the local cache unless the model needs updating.
 
+Hugging Face may still perform metadata checks when cached files exist. The
+backend retries transient disconnects and timeouts during Pyannote
+initialization, while authorization and model errors fail immediately. For
+slow or unstable connections, add these values to `.env`:
+
+```dotenv
+HF_HUB_DOWNLOAD_TIMEOUT=120
+DIARIZATION_LOAD_MAX_ATTEMPTS=3
+DIARIZATION_LOAD_RETRY_BACKOFF_SECONDS=2
+```
+
+`DIARIZATION_LOAD_RETRY_BACKOFF_SECONDS` is multiplied by the failed attempt
+number before the next retry.
+
 ## Pyannote 4 GPU environment
 
 The project uses pyannote.audio 4.x and its newer `token=` authentication API.

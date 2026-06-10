@@ -137,6 +137,8 @@ def get_transcriber() -> WhisperTranscriber:
         api_base_url=settings.diarization_api_base_url,
         api_key=settings.diarization_api_key,
         api_timeout_seconds=settings.diarization_api_timeout_seconds,
+        load_max_attempts=settings.diarization_load_max_attempts,
+        load_retry_backoff_seconds=settings.diarization_load_retry_backoff_seconds,
     )
     if settings.transcription_provider.strip().lower() in {"api", "remote"}:
         return ApiTranscriber(
