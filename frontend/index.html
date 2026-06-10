@@ -100,6 +100,25 @@
               <span id="liveTimer">00:00</span>
             </div>
             <p id="liveHint">音频仅发送到本机后端，并以 16 kHz 单声道 PCM16 交给 FunASR 流式识别。</p>
+            <div class="microphone-settings">
+              <label>
+                <span>麦克风设备</span>
+                <select id="microphoneSelect"><option value="">系统默认麦克风</option></select>
+              </label>
+              <div class="audio-processing-options">
+                <label><input id="echoCancellationToggle" type="checkbox" checked />回声消除</label>
+                <label><input id="noiseSuppressionToggle" type="checkbox" checked />噪声抑制</label>
+                <label><input id="autoGainToggle" type="checkbox" checked />自动增益</label>
+              </div>
+            </div>
+            <div class="audio-quality-card">
+              <div class="audio-quality-heading">
+                <span>输入音量与质量</span>
+                <strong id="audioQualityLabel">等待麦克风</strong>
+              </div>
+              <div class="audio-level-track"><span id="audioLevelBar"></span></div>
+              <p id="audioQualityDetail">开始录音后，这里会提示静音、音量过低或削波。</p>
+            </div>
             <div class="live-metrics">
               <span><small>处理状态</small><strong id="liveProcessing">空闲</strong></span>
               <span><small>音频队列</small><strong id="liveBackpressure">0.0s 服务端 · 0.0s 本地</strong></span>
@@ -199,6 +218,6 @@
         </aside>
       </section>
     </main>
-    <script src="./app.js?v=20260609-14"></script>
+    <script src="./app.js?v=20260610-15"></script>
   </body>
 </html>

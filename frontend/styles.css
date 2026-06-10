@@ -412,6 +412,100 @@ h1 {
   line-height: 1.7;
 }
 
+.microphone-settings,
+.audio-quality-card {
+  margin-bottom: 11px;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(235, 240, 234, 0.76);
+}
+
+.microphone-settings > label {
+  display: grid;
+  gap: 5px;
+  color: #66756e;
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.microphone-settings select {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 9px;
+  color: #33483f;
+  border: 1px solid rgba(36, 72, 63, 0.14);
+  border-radius: 8px;
+  outline: none;
+  background: #fbfcf7;
+  font: inherit;
+  font-size: 9px;
+}
+
+.microphone-settings select:disabled,
+.audio-processing-options input:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.audio-processing-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 12px;
+  margin-top: 9px;
+}
+
+.audio-processing-options label {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  color: #65756d;
+  font-size: 8px;
+}
+
+.audio-processing-options input {
+  accent-color: #b16a4e;
+}
+
+.audio-quality-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: #68776f;
+  font-size: 8px;
+}
+
+.audio-quality-heading strong {
+  color: #395248;
+}
+
+.audio-quality-heading strong.is-warning {
+  color: #ae5e49;
+}
+
+.audio-level-track {
+  height: 5px;
+  margin-top: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(36, 72, 63, 0.1);
+}
+
+.audio-level-track span {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #5f8b79 0%, #c2a854 72%, #c46b59 100%);
+  transition: width 120ms ease;
+}
+
+.audio-quality-card p {
+  margin: 7px 0 0;
+  color: #839088;
+  font-size: 8px;
+  line-height: 1.5;
+}
+
 .live-metrics {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

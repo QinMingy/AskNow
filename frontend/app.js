@@ -66,15 +66,23 @@ let livePendingMs = 0;
 let liveInFlightChunk = null;
 let liveDrainTimer = null;
 let liveRenderTimer = null;
+let liveCaptureMode = null;
+let liveQualityHistory = [];
+let liveWorkletFlushResolve = null;
 
 const elements = {
   audioInput: document.querySelector("#audioInput"),
+  audioLevelBar: document.querySelector("#audioLevelBar"),
+  audioQualityDetail: document.querySelector("#audioQualityDetail"),
+  audioQualityLabel: document.querySelector("#audioQualityLabel"),
+  autoGainToggle: document.querySelector("#autoGainToggle"),
   browserCookieSelect: document.querySelector("#browserCookieSelect"),
   cancelTaskButton: document.querySelector("#cancelTaskButton"),
   customQuestionButton: document.querySelector("#customQuestionButton"),
   customQuestionForm: document.querySelector("#customQuestionForm"),
   customQuestionInput: document.querySelector("#customQuestionInput"),
   durationLabel: document.querySelector("#durationLabel"),
+  echoCancellationToggle: document.querySelector("#echoCancellationToggle"),
   errorMessage: document.querySelector("#errorMessage"),
   fileModeButton: document.querySelector("#fileModeButton"),
   fileMeta: document.querySelector("#fileMeta"),
@@ -92,6 +100,8 @@ const elements = {
   liveStatus: document.querySelector("#liveStatus"),
   liveTimer: document.querySelector("#liveTimer"),
   liveZone: document.querySelector("#liveZone"),
+  microphoneSelect: document.querySelector("#microphoneSelect"),
+  noiseSuppressionToggle: document.querySelector("#noiseSuppressionToggle"),
   pickFileButton: document.querySelector("#pickFileButton"),
   providerStatus: document.querySelector("#providerStatus"),
   progressBar: document.querySelector("#progressBar"),
@@ -160,18 +170,104 @@ function encodePcm16(samples) {
   return buffer;
 }
 
+function sincSample(value) {
+  return value === 0 ? 1 : Math.sin(Math.PI * value) / (Math.PI * value);
+}
+
 function downsampleAudio(samples, inputRate, outputRate) {
-  if (inputRate === outputRate) return samples;
+  if (inputRate === outputRate) return new Float32Array(samples);
   const ratio = inputRate / outputRate;
   const output = new Float32Array(Math.round(samples.length / ratio));
+  const radius = 12;
   for (let outputIndex = 0; outputIndex < output.length; outputIndex += 1) {
-    const start = Math.floor(outputIndex * ratio);
-    const end = Math.min(samples.length, Math.floor((outputIndex + 1) * ratio));
-    let sum = 0;
-    for (let inputIndex = start; inputIndex < end; inputIndex += 1) sum += samples[inputIndex];
-    output[outputIndex] = sum / Math.max(1, end - start);
+    const center = outputIndex * ratio;
+    const start = Math.max(0, Math.floor(center) - radius + 1);
+    const end = Math.min(samples.length, Math.floor(center) + radius + 1);
+    let weighted = 0;
+    let weightTotal = 0;
+    for (let inputIndex = start; inputIndex < end; inputIndex += 1) {
+      const distance = center - inputIndex;
+      const weight = sincSample(distance) * sincSample(distance / radius);
+      weighted += samples[inputIndex] * weight;
+      weightTotal += weight;
+    }
+    output[outputIndex] = weightTotal ? weighted / weightTotal : 0;
   }
   return output;
+}
+
+function measureAudio(samples) {
+  let squared = 0;
+  let peak = 0;
+  let clipped = 0;
+  samples.forEach((sample) => {
+    const absolute = Math.abs(sample);
+    squared += sample * sample;
+    peak = Math.max(peak, absolute);
+    if (absolute >= 0.98) clipped += 1;
+  });
+  return {
+    rms: Math.sqrt(squared / Math.max(1, samples.length)),
+    peak,
+    clippedRatio: clipped / Math.max(1, samples.length),
+  };
+}
+
+function updateAudioQuality(metrics) {
+  liveQualityHistory.push(metrics);
+  if (liveQualityHistory.length > 15) liveQualityHistory.shift();
+  const rms = liveQualityHistory.reduce((sum, item) => sum + item.rms, 0) / liveQualityHistory.length;
+  const peak = Math.max(...liveQualityHistory.map((item) => item.peak));
+  const clipped = liveQualityHistory.some((item) => item.clippedRatio > 0.002);
+  const level = Math.min(100, Math.max(0, Math.round(Math.sqrt(rms) * 180)));
+  elements.audioLevelBar.style.width = `${level}%`;
+  elements.audioQualityLabel.classList.toggle("is-warning", clipped || rms < 0.008);
+
+  if (clipped) {
+    elements.audioQualityLabel.textContent = "音量过高";
+    elements.audioQualityDetail.textContent = "检测到削波，请远离麦克风或降低输入音量。";
+  } else if (rms < 0.003) {
+    elements.audioQualityLabel.textContent = "接近静音";
+    elements.audioQualityDetail.textContent = "没有检测到清晰语音，请检查麦克风和系统权限。";
+  } else if (rms < 0.012) {
+    elements.audioQualityLabel.textContent = "音量偏低";
+    elements.audioQualityDetail.textContent = "建议靠近麦克风，以提高中文字幕识别准确率。";
+  } else {
+    elements.audioQualityLabel.textContent = "输入正常";
+    elements.audioQualityDetail.textContent = `峰值 ${Math.round(peak * 100)}% · ${liveCaptureMode === "worklet" ? "AudioWorklet 高质量重采样" : "兼容采集模式"}`;
+  }
+}
+
+function resetAudioQuality() {
+  liveQualityHistory = [];
+  elements.audioLevelBar.style.width = "0%";
+  elements.audioQualityLabel.textContent = "等待麦克风";
+  elements.audioQualityLabel.classList.remove("is-warning");
+  elements.audioQualityDetail.textContent = "开始录音后，这里会提示静音、音量过低或削波。";
+}
+
+function setMicrophoneControlsDisabled(disabled) {
+  elements.microphoneSelect.disabled = disabled;
+  elements.echoCancellationToggle.disabled = disabled;
+  elements.noiseSuppressionToggle.disabled = disabled;
+  elements.autoGainToggle.disabled = disabled;
+}
+
+async function refreshMicrophoneDevices() {
+  if (!navigator.mediaDevices?.enumerateDevices) return;
+  const previous = elements.microphoneSelect.value;
+  const devices = (await navigator.mediaDevices.enumerateDevices())
+    .filter((device) => device.kind === "audioinput");
+  elements.microphoneSelect.innerHTML = '<option value="">系统默认麦克风</option>';
+  devices.forEach((device, index) => {
+    const option = document.createElement("option");
+    option.value = device.deviceId;
+    option.textContent = device.label || `麦克风 ${index + 1}`;
+    elements.microphoneSelect.append(option);
+  });
+  if ([...elements.microphoneSelect.options].some((option) => option.value === previous)) {
+    elements.microphoneSelect.value = previous;
+  }
 }
 
 function collectLiveSamples(samples) {
@@ -190,13 +286,16 @@ function collectLiveSamples(samples) {
       else liveSampleBuffers[0] = current.subarray(take);
       liveSampleCount -= take;
     }
+    updateAudioQuality(measureAudio(chunk));
     queueLiveAudioChunk(chunk);
   }
 }
 
-function queueLiveAudioChunk(samples, durationMs = STREAM_CHUNK_DURATION_MS) {
+function queueLiveAudioChunk(samples, durationMs = STREAM_CHUNK_DURATION_MS, alreadyNormalized = false) {
   if (!liveAudioContext) return;
-  const normalized = downsampleAudio(samples, liveAudioContext.sampleRate, STREAM_TARGET_SAMPLE_RATE);
+  const normalized = alreadyNormalized
+    ? samples
+    : downsampleAudio(samples, liveAudioContext.sampleRate, STREAM_TARGET_SAMPLE_RATE);
   livePendingChunks.push({
     sequence: null,
     durationMs: Math.max(1, Math.round(durationMs)),
@@ -205,6 +304,55 @@ function queueLiveAudioChunk(samples, durationMs = STREAM_CHUNK_DURATION_MS) {
   livePendingMs += durationMs;
   updateLiveBacklog();
   drainLiveAudioQueue();
+}
+
+async function createLiveCaptureGraph() {
+  liveSourceNode = liveAudioContext.createMediaStreamSource(liveMediaStream);
+  if (liveAudioContext.audioWorklet && window.AudioWorkletNode) {
+    try {
+      await liveAudioContext.audioWorklet.addModule("./audio-worklet.js?v=20260610-1");
+      liveProcessorNode = new AudioWorkletNode(liveAudioContext, "classroom-audio-capture", {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [1],
+        processorOptions: {
+          targetSampleRate: STREAM_TARGET_SAMPLE_RATE,
+          chunkDurationMs: STREAM_CHUNK_DURATION_MS,
+        },
+      });
+      liveProcessorNode.port.onmessage = (event) => {
+        if (event.data?.type === "flushed") {
+          liveWorkletFlushResolve?.();
+          liveWorkletFlushResolve = null;
+          return;
+        }
+        if (event.data?.type !== "audio") return;
+        updateAudioQuality(event.data.metrics);
+        queueLiveAudioChunk(event.data.samples, event.data.durationMs, true);
+      };
+      liveCaptureMode = "worklet";
+    } catch (error) {
+      console.warn("AudioWorklet unavailable; using compatibility capture.", error);
+    }
+  }
+  if (!liveProcessorNode) {
+    liveProcessorNode = liveAudioContext.createScriptProcessor(4096, 1, 1);
+    liveProcessorNode.onaudioprocess = (event) => collectLiveSamples(event.inputBuffer.getChannelData(0));
+    liveCaptureMode = "script-processor";
+  }
+  liveSourceNode.connect(liveProcessorNode);
+  liveProcessorNode.connect(liveAudioContext.destination);
+}
+
+function microphoneConstraints() {
+  const selectedDevice = elements.microphoneSelect.value;
+  return {
+    channelCount: 1,
+    echoCancellation: elements.echoCancellationToggle.checked,
+    noiseSuppression: elements.noiseSuppressionToggle.checked,
+    autoGainControl: elements.autoGainToggle.checked,
+    ...(selectedDevice ? { deviceId: { exact: selectedDevice } } : {}),
+  };
 }
 
 function drainLiveAudioQueue() {
@@ -750,6 +898,8 @@ async function startLiveSession() {
   livePendingChunks = [];
   livePendingMs = 0;
   liveInFlightChunk = null;
+  liveCaptureMode = null;
+  resetAudioQuality();
   window.clearTimeout(liveRenderTimer);
   liveRenderTimer = null;
   renderLiveTranscript();
@@ -758,9 +908,11 @@ async function startLiveSession() {
 
   try {
     liveMediaStream = await navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+      audio: microphoneConstraints(),
     });
+    await refreshMicrophoneDevices();
     liveAudioContext = new AudioContext();
+    await liveAudioContext.resume();
     const response = await fetch(`${API_BASE_URL}/api/stream/sessions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -786,11 +938,8 @@ async function startLiveSession() {
       liveSocket.addEventListener("error", reject, { once: true });
     });
 
-    liveSourceNode = liveAudioContext.createMediaStreamSource(liveMediaStream);
-    liveProcessorNode = liveAudioContext.createScriptProcessor(4096, 1, 1);
-    liveProcessorNode.onaudioprocess = (event) => collectLiveSamples(event.inputBuffer.getChannelData(0));
-    liveSourceNode.connect(liveProcessorNode);
-    liveProcessorNode.connect(liveAudioContext.destination);
+    await createLiveCaptureGraph();
+    setMicrophoneControlsDisabled(true);
 
     liveStartedAt = Date.now();
     liveTimerHandle = window.setInterval(updateLiveTimer, 500);
@@ -803,6 +952,7 @@ async function startLiveSession() {
   } catch (error) {
     showError(error instanceof Error ? error.message : "无法启动实时麦克风。");
     await releaseLiveResources();
+    setMicrophoneControlsDisabled(false);
     elements.startLiveButton.disabled = false;
     elements.liveStatus.textContent = "启动失败";
     setState("error");
@@ -820,7 +970,19 @@ async function stopLiveSession() {
 }
 
 async function stopLiveCapture() {
-  if (liveProcessorNode) liveProcessorNode.onaudioprocess = null;
+  if (liveCaptureMode === "worklet" && liveProcessorNode?.port) {
+    const flushed = new Promise((resolve) => {
+      liveWorkletFlushResolve = resolve;
+    });
+    liveProcessorNode.port.postMessage({ type: "flush" });
+    await Promise.race([
+      flushed,
+      new Promise((resolve) => window.setTimeout(resolve, 500)),
+    ]);
+  }
+  if (liveProcessorNode && "onaudioprocess" in liveProcessorNode) {
+    liveProcessorNode.onaudioprocess = null;
+  }
   if (liveSampleCount && liveAudioContext) {
     const tail = new Float32Array(liveSampleCount);
     let offset = 0;
@@ -840,6 +1002,9 @@ async function stopLiveCapture() {
   liveSourceNode = null;
   liveMediaStream = null;
   liveAudioContext = null;
+  liveCaptureMode = null;
+  liveWorkletFlushResolve = null;
+  setMicrophoneControlsDisabled(false);
 }
 
 async function releaseLiveResources() {
@@ -865,6 +1030,7 @@ function finishLiveUi() {
   elements.startLiveButton.disabled = false;
   elements.stopLiveButton.hidden = true;
   elements.stopLiveButton.disabled = false;
+  setMicrophoneControlsDisabled(false);
   setState("complete");
 }
 
@@ -945,6 +1111,8 @@ function setInputMode(nextMode) {
     livePartialSegments = [];
     elements.durationLabel.textContent = "等待开始";
     renderLiveTranscript();
+    resetAudioQuality();
+    refreshMicrophoneDevices().catch(() => {});
   } else {
     elements.durationLabel.textContent = selectedFile ? "等待转写" : "等待输入";
   }
@@ -1022,6 +1190,9 @@ elements.urlModeButton.addEventListener("click", () => setInputMode("url"));
 elements.liveModeButton.addEventListener("click", () => setInputMode("live"));
 elements.startLiveButton.addEventListener("click", startLiveSession);
 elements.stopLiveButton.addEventListener("click", stopLiveSession);
+navigator.mediaDevices?.addEventListener?.("devicechange", () => {
+  if (!liveStartedAt) refreshMicrophoneDevices().catch(() => {});
+});
 window.addEventListener("beforeunload", () => {
   liveMediaStream?.getTracks().forEach((track) => track.stop());
   if (liveSocket?.readyState === WebSocket.OPEN) liveSocket.close();
@@ -1061,5 +1232,6 @@ document.querySelectorAll(".action-button").forEach((button) => {
 });
 
 renderDemo();
+refreshMicrophoneDevices().catch(() => {});
 checkBackendCapabilities();
 checkAssistProviderStatus();

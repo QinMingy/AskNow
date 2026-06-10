@@ -99,7 +99,7 @@ final transcript event to arrive before the socket closes.
 
 ## Browser microphone format
 
-The Phase 5C frontend sends:
+The Phase 5D frontend sends:
 
 ```text
 mime_type: audio/pcm;format=s16le
@@ -109,7 +109,11 @@ sample width: 16-bit
 transport chunk: 200 ms
 ```
 
-Every binary frame contains little-endian raw PCM16 samples. The backend
+Every binary frame contains little-endian raw PCM16 samples. Modern browsers
+collect and resample audio in an AudioWorklet using a windowed-sinc resampler;
+ScriptProcessorNode remains only as a compatibility fallback. The frontend
+also reports local input level, silence, and clipping without uploading extra
+audio. The backend
 validates the session format and keeps a separate FunASR streaming cache for
 each session.
 
