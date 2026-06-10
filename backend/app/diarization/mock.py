@@ -15,3 +15,14 @@ class MockDiarizer:
         for index, segment in enumerate(segments):
             segment.speaker = "Speaker A" if index % 2 == 0 else "Speaker B"
         return segments
+
+
+class PassthroughDiarizer:
+    name = "passthrough"
+
+    def assign_speakers(
+        self,
+        audio_path: Path,
+        segments: list[TranscriptSegment],
+    ) -> list[TranscriptSegment]:
+        return segments

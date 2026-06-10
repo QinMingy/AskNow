@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import io
+import os
 import sys
 import time
 from contextlib import redirect_stderr, redirect_stdout
@@ -21,6 +22,32 @@ DEPENDENCIES = (
     ("funasr", "FunASR"),
     ("pyannote.audio", "pyannote.audio"),
 )
+
+
+def configured_dependencies() -> tuple[tuple[str, str], ...]:
+    dependencies = [
+        ("requests", "Requests"),
+        ("httpx", "HTTPX"),
+        ("yt_dlp", "yt-dlp"),
+        ("uvicorn", "Uvicorn"),
+    ]
+    transcription_provider = os.getenv("TRANSCRIPTION_PROVIDER", "local").lower()
+    diarization_provider = os.getenv("DIARIZATION_PROVIDER", "pyannote").lower()
+    stream_processor = os.getenv("STREAM_PROCESSOR", "funasr").lower()
+
+    if transcription_provider == "local":
+        dependencies.append(("faster_whisper", "faster-whisper"))
+    if stream_processor == "funasr":
+        dependencies.extend((("torch", "PyTorch"), ("funasr", "FunASR")))
+    if diarization_provider == "pyannote":
+        dependencies.extend(
+            (
+                ("torch", "PyTorch"),
+                ("torchaudio", "TorchAudio"),
+                ("pyannote.audio", "pyannote.audio"),
+            )
+        )
+    return tuple(dict.fromkeys(dependencies))
 
 
 def progress_bar(completed: int, total: int, width: int = 20) -> str:
@@ -84,4 +111,4 @@ def check_dependencies(
 
 
 if __name__ == "__main__":
-    raise SystemExit(0 if check_dependencies() else 1)
+    raise SystemExit(0 if check_dependencies(configured_dependencies()) else 1)

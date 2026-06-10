@@ -101,6 +101,7 @@ const elements = {
   liveTimer: document.querySelector("#liveTimer"),
   liveZone: document.querySelector("#liveZone"),
   microphoneSelect: document.querySelector("#microphoneSelect"),
+  modelModeLabel: document.querySelector("#modelModeLabel"),
   noiseSuppressionToggle: document.querySelector("#noiseSuppressionToggle"),
   pickFileButton: document.querySelector("#pickFileButton"),
   providerStatus: document.querySelector("#providerStatus"),
@@ -506,6 +507,16 @@ async function checkBackendCapabilities() {
     if (!response.ok) return;
 
     const health = await response.json();
+    const remoteProviders = [
+      health.asr_engine,
+      health.live_asr_engine,
+      health.diarization_provider,
+    ].filter((provider) => ["api", "remote"].includes(String(provider).toLowerCase()));
+    elements.modelModeLabel.textContent = remoteProviders.length === 0
+      ? "本地模型处理"
+      : remoteProviders.length === 3
+        ? "云端模型 API"
+        : "本地 / 云端混合";
     const supportsBrowserCookies =
       health.api_version === REQUIRED_API_VERSION &&
       Array.isArray(health.browser_cookie_sources) &&

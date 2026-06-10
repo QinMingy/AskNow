@@ -7,12 +7,19 @@ from pydantic import BaseModel
 class Settings(BaseModel):
     app_name: str = "Classroom Comprehension Assistant"
     allowed_extensions: set[str] = {".mp3", ".wav", ".m4a", ".mp4"}
+    transcription_provider: str = "local"
     whisper_model: str = "small"
     whisper_device: str = "cuda"
     whisper_compute_type: str = "float16"
+    transcription_api_base_url: str | None = None
+    transcription_api_key: str | None = None
+    transcription_api_timeout_seconds: float = 600.0
     diarization_provider: str = "pyannote"
     diarization_model: str = "pyannote/speaker-diarization-community-1"
     diarization_device: str = "cuda"
+    diarization_api_base_url: str | None = None
+    diarization_api_key: str | None = None
+    diarization_api_timeout_seconds: float = 600.0
     huggingface_token: str | None = None
     assist_provider: str = "litellm"
     assist_base_url: str | None = "https://api.deepseek.com/v1"
@@ -28,6 +35,9 @@ class Settings(BaseModel):
     stream_backpressure_degraded_ms: int = 15000
     stream_session_retention_seconds: int = 3600
     stream_processor: str = "funasr"
+    stream_api_base_url: str | None = None
+    stream_api_key: str | None = None
+    stream_api_timeout_seconds: float = 120.0
     stream_window_ms: int = 20000
     stream_process_interval_ms: int = 600
     funasr_stream_model: str = "paraformer-zh-streaming"
@@ -50,17 +60,32 @@ class Settings(BaseModel):
 
 @lru_cache
 def get_settings() -> Settings:
+    model_api_base_url = os.getenv("MODEL_API_BASE_URL")
+    model_api_key = os.getenv("MODEL_API_KEY")
     return Settings(
         app_name=os.getenv("APP_NAME", "Classroom Comprehension Assistant"),
+        transcription_provider=os.getenv("TRANSCRIPTION_PROVIDER", "local"),
         whisper_model=os.getenv("WHISPER_MODEL", "small"),
         whisper_device=os.getenv("WHISPER_DEVICE", "cuda"),
         whisper_compute_type=os.getenv("WHISPER_COMPUTE_TYPE", "float16"),
+        transcription_api_base_url=os.getenv("TRANSCRIPTION_API_BASE_URL")
+        or model_api_base_url,
+        transcription_api_key=os.getenv("TRANSCRIPTION_API_KEY") or model_api_key,
+        transcription_api_timeout_seconds=float(
+            os.getenv("TRANSCRIPTION_API_TIMEOUT_SECONDS", "600")
+        ),
         diarization_provider=os.getenv("DIARIZATION_PROVIDER", "pyannote"),
         diarization_model=os.getenv(
             "DIARIZATION_MODEL",
             "pyannote/speaker-diarization-community-1",
         ),
         diarization_device=os.getenv("DIARIZATION_DEVICE", "cuda"),
+        diarization_api_base_url=os.getenv("DIARIZATION_API_BASE_URL")
+        or model_api_base_url,
+        diarization_api_key=os.getenv("DIARIZATION_API_KEY") or model_api_key,
+        diarization_api_timeout_seconds=float(
+            os.getenv("DIARIZATION_API_TIMEOUT_SECONDS", "600")
+        ),
         huggingface_token=(
             os.getenv("HUGGINGFACE_API_KEY")
             or os.getenv("HF_TOKEN")
@@ -88,6 +113,9 @@ def get_settings() -> Settings:
             os.getenv("STREAM_SESSION_RETENTION_SECONDS", "3600")
         ),
         stream_processor=os.getenv("STREAM_PROCESSOR", "funasr"),
+        stream_api_base_url=os.getenv("STREAM_API_BASE_URL") or model_api_base_url,
+        stream_api_key=os.getenv("STREAM_API_KEY") or model_api_key,
+        stream_api_timeout_seconds=float(os.getenv("STREAM_API_TIMEOUT_SECONDS", "120")),
         stream_window_ms=int(os.getenv("STREAM_WINDOW_MS", "20000")),
         stream_process_interval_ms=int(os.getenv("STREAM_PROCESS_INTERVAL_MS", "600")),
         funasr_stream_model=os.getenv("FUNASR_STREAM_MODEL", "paraformer-zh-streaming"),

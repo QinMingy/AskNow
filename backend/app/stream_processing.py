@@ -1,6 +1,7 @@
 import logging
 import threading
 import time
+import uuid
 import wave
 from dataclasses import dataclass
 from io import BytesIO
@@ -9,6 +10,7 @@ from tempfile import NamedTemporaryFile
 from typing import Protocol
 
 from .schemas import IncrementalTranscriptSegment, TranscriptSegment
+from .remote_models import RemoteModelClient
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +40,7 @@ class FunASRSessionState:
 
 class FunASRStreamProcessor:
     incremental = True
+    uses_local_gpu = True
     speaker_label = "Speaker pending"
 
     def __init__(
@@ -205,6 +208,72 @@ class FunASRStreamProcessor:
         return str(downloaded)
 
 
+@dataclass
+class ApiStreamSessionState:
+    session_id: str
+    sample_rate: int
+    channels: int
+
+
+class ApiStreamProcessor:
+    incremental = True
+    uses_local_gpu = False
+
+    def __init__(self, client: RemoteModelClient):
+        self.client = client
+
+    @property
+    def ready(self) -> bool:
+        return True
+
+    def prepare(self) -> None:
+        return None
+
+    def create_session(self, *, mime_type: str, sample_rate: int, channels: int):
+        if "pcm" not in mime_type.lower():
+            raise ValueError("Remote live ASR sessions require raw PCM16 audio.")
+        return ApiStreamSessionState(
+            session_id=uuid.uuid4().hex,
+            sample_rate=sample_rate,
+            channels=channels,
+        )
+
+    def process_incremental(
+        self,
+        chunks: list[ProcessingAudioChunk],
+        *,
+        state: ApiStreamSessionState,
+        mime_type: str,
+        window_start_ms: int,
+        is_final: bool,
+    ) -> list[TranscriptSegment]:
+        if not chunks:
+            return []
+        with NamedTemporaryFile(delete=False, suffix=".pcm") as audio_file:
+            path = Path(audio_file.name)
+            for chunk in chunks:
+                audio_file.write(chunk.payload)
+        try:
+            payload = self.client.post_audio(
+                "/v1/audio/stream-transcriptions",
+                path,
+                data={
+                    "session_id": state.session_id,
+                    "mime_type": mime_type,
+                    "window_start_ms": str(window_start_ms),
+                    "is_final": str(is_final).lower(),
+                    "sample_rate": str(state.sample_rate),
+                    "channels": str(state.channels),
+                },
+            )
+            return [
+                TranscriptSegment.model_validate(segment)
+                for segment in payload.get("segments", [])
+            ]
+        finally:
+            path.unlink(missing_ok=True)
+
+
 def resolve_funasr_model_path(model: str, *, offline_only: bool = False) -> str:
     supplied = Path(model).expanduser()
     if is_complete_funasr_model(supplied):
@@ -256,6 +325,8 @@ def funasr_model_repository(model: str) -> str:
 
 
 class WhisperStreamProcessor:
+    uses_local_gpu = True
+
     def __init__(self, transcriber):
         self.transcriber = transcriber
 
@@ -285,6 +356,7 @@ class WhisperStreamFinalizer:
 
     def __init__(self, transcriber):
         self.transcriber = transcriber
+        self.uses_local_gpu = bool(getattr(transcriber, "uses_local_gpu", True))
 
     def finalize(
         self,

@@ -40,12 +40,14 @@ from .schemas import (
 from .sources import SourceRegistry, create_default_registry
 from .streaming import StreamSessionManager, handle_stream_websocket
 from .stream_processing import (
+    ApiStreamProcessor,
     FunASRStreamProcessor,
     WhisperStreamFinalizer,
     WhisperStreamProcessor,
 )
 from .tasks import TaskManager
-from .transcriber import WhisperTranscriber
+from .remote_models import RemoteModelClient
+from .transcriber import ApiTranscriber, WhisperTranscriber
 
 configure_logging()
 logger = logging.getLogger(__name__)
@@ -119,7 +121,8 @@ async def log_requests(request: Request, call_next):
 def get_transcriber() -> WhisperTranscriber:
     settings = get_settings()
     logger.info(
-        "transcriber.create whisper_model=%s whisper_device=%s diarization_provider=%s diarization_model=%s",
+        "transcriber.create provider=%s whisper_model=%s whisper_device=%s diarization_provider=%s diarization_model=%s",
+        settings.transcription_provider,
         settings.whisper_model,
         settings.whisper_device,
         settings.diarization_provider,
@@ -130,7 +133,20 @@ def get_transcriber() -> WhisperTranscriber:
         model=settings.diarization_model,
         token=settings.huggingface_token,
         device=settings.diarization_device,
+        api_base_url=settings.diarization_api_base_url,
+        api_key=settings.diarization_api_key,
+        api_timeout_seconds=settings.diarization_api_timeout_seconds,
     )
+    if settings.transcription_provider.strip().lower() in {"api", "remote"}:
+        return ApiTranscriber(
+            settings,
+            diarizer,
+            RemoteModelClient(
+                base_url=settings.transcription_api_base_url or "",
+                api_key=settings.transcription_api_key,
+                timeout_seconds=settings.transcription_api_timeout_seconds,
+            ),
+        )
     return WhisperTranscriber(settings, diarizer)
 
 
@@ -186,6 +202,14 @@ def get_stream_session_manager() -> StreamSessionManager:
             offline_only=settings.funasr_offline_only,
             hotwords=settings.funasr_hotwords,
         )
+    elif processor_name in {"api", "remote"}:
+        processor = ApiStreamProcessor(
+            RemoteModelClient(
+                base_url=settings.stream_api_base_url or "",
+                api_key=settings.stream_api_key,
+                timeout_seconds=settings.stream_api_timeout_seconds,
+            )
+        )
     elif processor_name in {"none", "disabled", "off"}:
         processor = None
     else:
@@ -222,10 +246,18 @@ def health(
         status="ok",
         service=settings.app_name,
         api_version=app.version,
-        asr_engine="faster-whisper",
+        asr_engine=(
+            "faster-whisper"
+            if settings.transcription_provider.strip().lower() == "local"
+            else settings.transcription_provider
+        ),
         live_asr_engine=settings.stream_processor,
         live_asr_ready=stream_manager.processor_ready,
-        device=settings.whisper_device,
+        device=(
+            settings.whisper_device
+            if settings.transcription_provider.strip().lower() == "local"
+            else "remote"
+        ),
         diarization_provider=settings.diarization_provider,
         assist_provider=settings.assist_provider,
         supported_video_sources=["YouTube", "Bilibili"],

@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException
 
-from app.diarization import MockDiarizer, PyannoteDiarizer, create_diarizer
+from app.diarization import ApiDiarizer, MockDiarizer, PassthroughDiarizer, PyannoteDiarizer, create_diarizer
 from app.schemas import TranscriptSegment
 
 
@@ -126,6 +126,20 @@ def test_diarizer_factory_selects_provider():
     assert isinstance(
         create_diarizer("pyannote", model="model", token="token", device="cuda"),
         PyannoteDiarizer,
+    )
+    assert isinstance(
+        create_diarizer(
+            "api",
+            model="model",
+            token=None,
+            device="cuda",
+            api_base_url="https://models.example.com",
+        ),
+        ApiDiarizer,
+    )
+    assert isinstance(
+        create_diarizer("passthrough", model="model", token=None, device="cuda"),
+        PassthroughDiarizer,
     )
 
     with pytest.raises(ValueError, match="Unsupported diarization provider"):

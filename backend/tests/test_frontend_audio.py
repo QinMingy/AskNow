@@ -16,6 +16,7 @@ def test_live_microphone_ui_exposes_device_and_quality_controls():
         "audioLevelBar",
     ):
         assert f'id="{element_id}"' in html
+    assert 'id="modelModeLabel"' in html
 
 
 def test_audio_worklet_uses_sinc_resampling_and_quality_metrics():

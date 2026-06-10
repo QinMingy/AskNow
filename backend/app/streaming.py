@@ -5,6 +5,7 @@ import queue
 import threading
 import time
 import uuid
+from contextlib import nullcontext
 from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from dataclasses import dataclass, field
@@ -513,7 +514,12 @@ class StreamSessionManager:
             state="processing" if processor_ready else "initializing",
         )
         try:
-            with self.gpu_scheduler.acquire():
+            scheduler = (
+                self.gpu_scheduler.acquire()
+                if bool(getattr(self.processor, "uses_local_gpu", True))
+                else nullcontext()
+            )
+            with scheduler:
                 if incremental:
                     segments = self.processor.process_incremental(
                         chunks,
@@ -589,7 +595,12 @@ class StreamSessionManager:
         )
         self._publish(session, "refinement_status", state="processing")
         try:
-            with self.gpu_scheduler.acquire():
+            scheduler = (
+                self.gpu_scheduler.acquire()
+                if bool(getattr(self.finalizer, "uses_local_gpu", True))
+                else nullcontext()
+            )
+            with scheduler:
                 refined = self.finalizer.finalize(
                     chunks,
                     sample_rate=session.sample_rate,

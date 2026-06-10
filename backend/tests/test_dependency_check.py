@@ -1,6 +1,6 @@
 from io import StringIO
 
-from dependency_check import check_dependencies, progress_bar
+from dependency_check import check_dependencies, configured_dependencies, progress_bar
 
 
 def test_progress_bar_represents_completed_items():
@@ -37,3 +37,16 @@ def test_dependency_check_identifies_failed_dependency():
     )
     assert "FAILED Broken package" in output.getvalue()
     assert "missing runtime" in output.getvalue()
+
+
+def test_api_only_configuration_skips_local_model_dependencies(monkeypatch):
+    monkeypatch.setenv("TRANSCRIPTION_PROVIDER", "api")
+    monkeypatch.setenv("DIARIZATION_PROVIDER", "api")
+    monkeypatch.setenv("STREAM_PROCESSOR", "api")
+
+    modules = {module for module, _ in configured_dependencies()}
+
+    assert "httpx" in modules
+    assert "faster_whisper" not in modules
+    assert "funasr" not in modules
+    assert "pyannote.audio" not in modules

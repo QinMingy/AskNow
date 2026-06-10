@@ -8,6 +8,7 @@ from fastapi import HTTPException, UploadFile, status
 
 from .config import Settings
 from .diarization import Diarizer
+from .remote_models import RemoteModelClient, parse_transcription_response
 from .schemas import SourceMetadata, TranscriptSegment, TranscriptionResponse
 from .sources.registry import SourceRegistry
 
@@ -22,6 +23,8 @@ class TranscriptionCancelled(Exception):
 
 
 class WhisperTranscriber:
+    uses_local_gpu = True
+
     def __init__(self, settings: Settings, diarizer: Diarizer):
         self.settings = settings
         self.diarizer = diarizer
@@ -243,5 +246,44 @@ class WhisperTranscriber:
             for index, segment in enumerate(segments_iter, start=1)
             if segment.text.strip()
         ]
+
+    _transcribe_path = transcribe_path
+
+
+class ApiTranscriber(WhisperTranscriber):
+    uses_local_gpu = False
+
+    def __init__(self, settings: Settings, diarizer: Diarizer, client: RemoteModelClient):
+        super().__init__(settings, diarizer)
+        self.client = client
+
+    def _load_model(self):
+        return None
+
+    def transcribe_path(
+        self,
+        audio_path: Path,
+        *,
+        progress: ProgressCallback | None = None,
+        cancel_check: CancelCheck | None = None,
+    ) -> TranscriptionResponse:
+        if cancel_check and cancel_check():
+            raise TranscriptionCancelled()
+        if progress:
+            progress("transcribing", 25, "Sending audio to transcription API")
+        response = parse_transcription_response(
+            self.client.post_audio("/v1/audio/transcriptions", audio_path)
+        )
+        if cancel_check and cancel_check():
+            raise TranscriptionCancelled()
+        if progress:
+            progress("diarizing", 78, "Identifying speakers")
+        response.segments = self.diarizer.assign_speakers(audio_path, response.segments)
+        if progress:
+            progress("diarizing", 95, "Speaker identification complete")
+        return response
+
+    def transcribe_stream_path(self, audio_path: Path) -> list[TranscriptSegment]:
+        return self.transcribe_path(audio_path).segments
 
     _transcribe_path = transcribe_path

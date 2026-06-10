@@ -2,6 +2,7 @@ import logging
 import shutil
 import threading
 import uuid
+from contextlib import nullcontext
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -250,8 +251,13 @@ class TaskManager:
     ) -> TranscriptionResponse:
         try:
             self._raise_if_cancelled(task_id)
-            self._update(task_id, "waiting_for_gpu", 20, "Waiting for GPU slot")
-            with self._gpu_scheduler.acquire():
+            uses_local_gpu = bool(getattr(transcriber, "uses_local_gpu", True))
+            if uses_local_gpu:
+                self._update(task_id, "waiting_for_gpu", 20, "Waiting for GPU slot")
+            else:
+                self._update(task_id, "transcribing", 20, "Calling transcription API")
+            scheduler = self._gpu_scheduler.acquire() if uses_local_gpu else nullcontext()
+            with scheduler:
                 self._raise_if_cancelled(task_id)
                 response = transcriber.transcribe_path(
                     source_path,
