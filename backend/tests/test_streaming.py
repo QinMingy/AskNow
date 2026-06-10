@@ -205,7 +205,38 @@ def test_stream_websocket_reports_protocol_errors():
     finally:
         app.dependency_overrides.clear()
 
-    assert manager.get_status(created.session_id).state == "created"
+    assert manager.get_status(created.session_id).state == "cancelled"
+
+
+def test_disconnected_stream_releases_worker_capacity():
+    class FakeProcessor:
+        def process(self, chunks, *, mime_type, window_start_ms):
+            return []
+
+    manager = StreamSessionManager(processor=FakeProcessor(), worker_count=1)
+    first = create_session(manager)
+    first_session = manager._get(first.session_id)
+
+    manager.connect(first.session_id)
+    manager.add_chunk(
+        first.session_id,
+        sequence=1,
+        duration_ms=200,
+        payload=b"audio",
+    )
+    manager.disconnect(first.session_id)
+    first_session.worker_future.result(timeout=1)
+
+    second = create_session(manager)
+    second_session = manager._get(second.session_id)
+    manager.disconnect(second.session_id)
+    second_session.worker_future.result(timeout=1)
+
+    assert manager.get_status(first.session_id).state == "cancelled"
+    assert manager.get_status(first.session_id).queued_ms == 0
+    assert first_session.recording == []
+    assert manager.get_status(second.session_id).state == "cancelled"
+    manager.shutdown()
 
 
 def test_stream_websocket_reports_full_backpressure():

@@ -216,9 +216,14 @@ class StreamSessionManager:
         session = self._get(session_id)
         with self._lock:
             if session.state not in {"stopped", "cancelled"}:
-                session.state = "created"
-                session.updated_at = utc_now()
-        logger.info("stream.session.disconnected session_id=%s", session_id)
+                self._mark_closed(session, "cancelled")
+                self._discard_audio(session)
+                session.wake_worker.set()
+        logger.info(
+            "stream.session.disconnected session_id=%s state=%s",
+            session_id,
+            session.state,
+        )
 
     def add_chunk(
         self,
@@ -364,7 +369,7 @@ class StreamSessionManager:
                         )
                 self._mark_closed(session, state)
                 if state == "cancelled":
-                    session.recording.clear()
+                    self._discard_audio(session)
                 session.wake_worker.set()
             response = self._status(session)
         logger.info("stream.session.%s session_id=%s", response.state, session_id)
@@ -376,6 +381,14 @@ class StreamSessionManager:
         session.state = state
         session.updated_at = now
         session.stopped_at = now
+
+    @staticmethod
+    def _discard_audio(session: StreamSession) -> None:
+        session.chunks.clear()
+        session.queued_ms = 0
+        session.history.clear()
+        session.history_ms = 0
+        session.recording.clear()
 
     def _get(self, session_id: str) -> StreamSession:
         with self._lock:

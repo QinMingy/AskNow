@@ -10,6 +10,7 @@ from app.assistant import (
     RuleBasedAssistProvider,
     UnderstandingAssistant,
     action_instruction,
+    build_llm_assist_response,
 )
 from app.main import app, get_understanding_assistant
 from app.schemas import AssistRequest, TranscriptSegment
@@ -331,6 +332,34 @@ def test_provider_factory_creates_litellm_provider_with_config():
     )
 
     assert isinstance(provider, LiteLLMAssistProvider)
+
+
+def test_llm_assist_response_accepts_fenced_json():
+    response = build_llm_assist_response(
+        AssistRequest(action="explain", segments=sample_segments()),
+        "test-provider",
+        '```json\n{"title":"Title","summary":"Summary","bullets":["One"]}\n```',
+    )
+
+    assert response.title == "Title"
+    assert response.bullets == ["One"]
+
+
+def test_understanding_assistant_falls_back_when_provider_fails():
+    class FailingProvider:
+        name = "failing"
+
+        def assist(self, request):
+            raise ValueError("invalid model response")
+
+    assistant = UnderstandingAssistant(FailingProvider())
+
+    response = assistant.assist(
+        AssistRequest(action="explain", segments=sample_segments())
+    )
+
+    assert response.provider == "rule_based"
+    assert response.bullets
 
 
 def test_action_instructions_are_distinct():

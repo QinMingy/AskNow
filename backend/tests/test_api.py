@@ -7,7 +7,7 @@ from app.schemas import SourceMetadata, TranscriptSegment, TranscriptionResponse
 
 
 class FakeTranscriber:
-    async def transcribe_upload(self, file):
+    async def transcribe_upload(self, file, gpu_scheduler=None):
         return TranscriptionResponse(
             language="zh",
             duration=4.2,
@@ -22,7 +22,7 @@ class FakeTranscriber:
             ],
         )
 
-    def transcribe_url(self, url, source_registry, browser=None):
+    def transcribe_url(self, url, source_registry, browser=None, gpu_scheduler=None):
         return TranscriptionResponse(
             language="zh",
             duration=6.5,
@@ -132,9 +132,14 @@ def test_transcribe_url_accepts_browser_cookie_source():
     seen = {}
 
     class BrowserAwareTranscriber(FakeTranscriber):
-        def transcribe_url(self, url, source_registry, browser=None):
+        def transcribe_url(self, url, source_registry, browser=None, gpu_scheduler=None):
             seen["browser"] = browser
-            return super().transcribe_url(url, source_registry, browser=browser)
+            return super().transcribe_url(
+                url,
+                source_registry,
+                browser=browser,
+                gpu_scheduler=gpu_scheduler,
+            )
 
     app.dependency_overrides[get_transcriber] = lambda: BrowserAwareTranscriber()
     app.dependency_overrides[get_source_registry] = lambda: object()

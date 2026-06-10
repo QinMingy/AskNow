@@ -409,14 +409,21 @@ def build_llm_assist_response(
     provider_name: str,
     content: str,
 ) -> AssistResponse:
-    result = json.loads(content)
+    result = _parse_llm_json_object(content)
+    title = str(result.get("title", "")).strip()
+    summary = str(result.get("summary", "")).strip()
+    bullets = result.get("bullets", [])
+    if not title or not summary:
+        raise ValueError("LLM assist response must include non-empty title and summary.")
+    if not isinstance(bullets, list):
+        raise ValueError("LLM assist response bullets must be a JSON array.")
 
     return AssistResponse(
         action=request.action,
         provider=provider_name,
-        title=str(result["title"]),
-        summary=str(result["summary"]),
-        bullets=[str(item) for item in result.get("bullets", [])],
+        title=title,
+        summary=summary,
+        bullets=[str(item) for item in bullets],
         caution=str(
             result.get(
                 "caution",
@@ -424,6 +431,28 @@ def build_llm_assist_response(
             )
         ),
     )
+
+
+def _parse_llm_json_object(content: str) -> dict:
+    normalized = content.strip()
+    if normalized.startswith("```"):
+        lines = normalized.splitlines()
+        if lines:
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        normalized = "\n".join(lines).strip()
+
+    object_start = normalized.find("{")
+    if object_start < 0:
+        raise ValueError("LLM assist response did not contain a JSON object.")
+    try:
+        result, _ = json.JSONDecoder().raw_decode(normalized[object_start:])
+    except json.JSONDecodeError as exc:
+        raise ValueError("LLM assist response contained invalid JSON.") from exc
+    if not isinstance(result, dict):
+        raise ValueError("LLM assist response must be a JSON object.")
+    return result
 
 
 def action_instruction(action: str) -> str:
@@ -489,8 +518,21 @@ class AssistProviderFactory:
 
 
 class UnderstandingAssistant:
-    def __init__(self, provider: AssistProvider):
+    def __init__(
+        self,
+        provider: AssistProvider,
+        fallback_provider: AssistProvider | None = None,
+    ):
         self.provider = provider
+        self.fallback_provider = (
+            fallback_provider
+            if fallback_provider is not None
+            else (
+                None
+                if provider.name == RuleBasedAssistProvider.name
+                else RuleBasedAssistProvider()
+            )
+        )
 
     def assist(self, request: AssistRequest) -> AssistResponse:
         started = time.perf_counter()
@@ -509,10 +551,18 @@ class UnderstandingAssistant:
                 self.provider.name,
                 request.action,
             )
-            raise
+            if self.fallback_provider is None:
+                raise
+            logger.warning(
+                "assist.fallback primary_provider=%s fallback_provider=%s action=%s",
+                self.provider.name,
+                self.fallback_provider.name,
+                request.action,
+            )
+            response = self.fallback_provider.assist(request)
         logger.info(
             "assist.complete provider=%s action=%s elapsed_ms=%.1f",
-            self.provider.name,
+            response.provider,
             request.action,
             (time.perf_counter() - started) * 1000,
         )

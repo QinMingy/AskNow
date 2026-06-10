@@ -281,8 +281,9 @@ def health(
 async def transcribe_audio(
     file: UploadFile,
     transcriber: WhisperTranscriber = Depends(get_transcriber),
+    gpu_scheduler: GpuScheduler = Depends(get_gpu_scheduler),
 ) -> TranscriptionResponse:
-    return await transcriber.transcribe_upload(file)
+    return await transcriber.transcribe_upload(file, gpu_scheduler=gpu_scheduler)
 
 
 @app.post("/api/transcribe-url", response_model=TranscriptionResponse)
@@ -290,8 +291,14 @@ def transcribe_video_url(
     request: VideoUrlRequest,
     transcriber: WhisperTranscriber = Depends(get_transcriber),
     source_registry: SourceRegistry = Depends(get_source_registry),
+    gpu_scheduler: GpuScheduler = Depends(get_gpu_scheduler),
 ) -> TranscriptionResponse:
-    return transcriber.transcribe_url(request.url, source_registry, browser=request.browser)
+    return transcriber.transcribe_url(
+        request.url,
+        source_registry,
+        browser=request.browser,
+        gpu_scheduler=gpu_scheduler,
+    )
 
 
 @app.post(

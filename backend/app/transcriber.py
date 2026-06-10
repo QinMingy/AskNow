@@ -1,5 +1,7 @@
+import asyncio
 import logging
 import time
+from contextlib import nullcontext
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 from typing import Callable
@@ -8,6 +10,7 @@ from fastapi import HTTPException, UploadFile, status
 
 from .config import Settings
 from .diarization import Diarizer
+from .gpu import GpuScheduler
 from .remote_models import RemoteModelClient, parse_transcription_response
 from .schemas import SourceMetadata, TranscriptSegment, TranscriptionResponse
 from .sources.registry import SourceRegistry
@@ -77,7 +80,11 @@ class WhisperTranscriber:
         )
         return self._model
 
-    async def transcribe_upload(self, file: UploadFile) -> TranscriptionResponse:
+    async def transcribe_upload(
+        self,
+        file: UploadFile,
+        gpu_scheduler: GpuScheduler | None = None,
+    ) -> TranscriptionResponse:
         suffix = Path(file.filename or "").suffix.lower()
         if suffix not in self.settings.allowed_extensions:
             allowed = ", ".join(sorted(self.settings.allowed_extensions))
@@ -99,7 +106,11 @@ class WhisperTranscriber:
                 suffix,
                 uploaded_bytes,
             )
-            return self._transcribe_path(tmp_path)
+            return await asyncio.to_thread(
+                self._transcribe_path_scheduled,
+                tmp_path,
+                gpu_scheduler,
+            )
         finally:
             tmp_path.unlink(missing_ok=True)
             await file.close()
@@ -109,6 +120,7 @@ class WhisperTranscriber:
         url: str,
         source_registry: SourceRegistry,
         browser: str | None = None,
+        gpu_scheduler: GpuScheduler | None = None,
     ) -> TranscriptionResponse:
         with TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             logger.info("video.resolve.start browser=%s", browser or "anonymous")
@@ -119,13 +131,26 @@ class WhisperTranscriber:
                 media.media_path.suffix.lower(),
                 media.media_path.stat().st_size,
             )
-            response = self._transcribe_path(media.media_path)
+            response = self._transcribe_path_scheduled(media.media_path, gpu_scheduler)
             response.source = SourceMetadata(
                 provider=media.provider,
                 title=media.title,
                 webpage_url=media.webpage_url,
             )
             return response
+
+    def _transcribe_path_scheduled(
+        self,
+        audio_path: Path,
+        gpu_scheduler: GpuScheduler | None,
+    ) -> TranscriptionResponse:
+        scheduler = (
+            gpu_scheduler.acquire()
+            if gpu_scheduler is not None and self.uses_local_gpu
+            else nullcontext()
+        )
+        with scheduler:
+            return self._transcribe_path(audio_path)
 
     def transcribe_path(
         self,
