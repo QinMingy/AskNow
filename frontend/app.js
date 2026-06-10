@@ -511,7 +511,9 @@ async function checkBackendCapabilities() {
       health.asr_engine,
       health.live_asr_engine,
       health.diarization_provider,
-    ].filter((provider) => ["api", "remote"].includes(String(provider).toLowerCase()));
+    ].filter((provider) =>
+      ["api", "remote", "volcengine", "doubao"].includes(String(provider).toLowerCase())
+    );
     elements.modelModeLabel.textContent = remoteProviders.length === 0
       ? "本地模型处理"
       : remoteProviders.length === 3

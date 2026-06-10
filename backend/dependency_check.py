@@ -39,6 +39,8 @@ def configured_dependencies() -> tuple[tuple[str, str], ...]:
         dependencies.append(("faster_whisper", "faster-whisper"))
     if stream_processor == "funasr":
         dependencies.extend((("torch", "PyTorch"), ("funasr", "FunASR")))
+    if stream_processor in {"volcengine", "doubao"}:
+        dependencies.append(("websockets", "WebSockets"))
     if diarization_provider == "pyannote":
         dependencies.extend(
             (

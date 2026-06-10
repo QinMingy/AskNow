@@ -797,6 +797,62 @@ def test_stream_manager_warms_up_processor_once():
     manager.shutdown()
 
 
+def test_stream_manager_finalizes_incremental_provider_after_idle_stop():
+    class FinalizableProcessor:
+        incremental = True
+
+        def create_session(self, **kwargs):
+            return {"finalized": False}
+
+        def process_incremental(self, chunks, **kwargs):
+            return []
+
+        def finalize_session(self, *, state):
+            state["finalized"] = True
+            return [
+                TranscriptSegment(
+                    id=1,
+                    start=0,
+                    end=0.4,
+                    speaker="Speaker pending",
+                    text="provider final result",
+                )
+            ]
+
+    manager = StreamSessionManager(
+        processor=FinalizableProcessor(),
+        process_interval_ms=200,
+    )
+    created = manager.create(
+        StreamSessionCreateRequest(
+            mime_type="audio/pcm;format=s16le",
+            sample_rate=16000,
+            channels=1,
+            chunk_duration_ms=200,
+        )
+    )
+    manager.add_chunk(
+        created.session_id,
+        sequence=1,
+        duration_ms=200,
+        payload=b"\x00\x00" * 3200,
+    )
+    deadline = time.time() + 2
+    while time.time() < deadline and manager.get_status(created.session_id).processed_chunks < 1:
+        time.sleep(0.01)
+
+    manager.stop_and_wait(created.session_id)
+    events = []
+    while event := manager.wait_for_event(created.session_id, timeout=0.01):
+        events.append(event)
+        manager.acknowledge_event(created.session_id)
+
+    final = next(event for event in events if event["type"] == "transcript_final")
+    assert final["segments"][0]["text"] == "provider final result"
+    assert manager._get(created.session_id).processor_state["finalized"] is True
+    manager.shutdown()
+
+
 def test_pcm_wav_window_combines_independently_decodable_chunks():
     import io
     import wave

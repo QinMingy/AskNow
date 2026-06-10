@@ -59,7 +59,7 @@ if not "%DEPENDENCY_CHECK%"=="0" (
 
 echo Checking live ASR configuration...
 pushd "%BACKEND_DIR%"
-"%ENV_PYTHON%" -c "from app.config import get_settings; from app.stream_processing import resolve_funasr_model_path; s=get_settings(); is_api=s.stream_processor.lower() in {'api','remote'}; assert not is_api or s.stream_api_base_url, 'STREAM_API_BASE_URL is required'; print('remote stream API' if is_api else resolve_funasr_model_path(s.funasr_stream_model, offline_only=s.funasr_offline_only))" >nul 2>nul
+"%ENV_PYTHON%" -c "from app.config import get_settings; from app.stream_processing import resolve_funasr_model_path; s=get_settings(); p=s.stream_processor.lower(); assert p not in {'api','remote'} or s.stream_api_base_url, 'STREAM_API_BASE_URL is required'; assert p not in {'volcengine','doubao'} or (s.volcengine_app_id and s.volcengine_access_token and s.volcengine_resource_id), 'VOLCENGINE_APP_ID, VOLCENGINE_ACCESS_TOKEN and VOLCENGINE_RESOURCE_ID are required'; print('remote stream provider' if p in {'api','remote','volcengine','doubao'} else resolve_funasr_model_path(s.funasr_stream_model, offline_only=s.funasr_offline_only))" >nul 2>nul
 set "FUNASR_CHECK=%ERRORLEVEL%"
 popd
 if not "%FUNASR_CHECK%"=="0" (

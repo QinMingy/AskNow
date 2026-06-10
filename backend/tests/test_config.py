@@ -60,6 +60,24 @@ def test_shared_model_api_configuration_is_used_as_fallback(monkeypatch):
         get_settings.cache_clear()
 
 
+def test_volcengine_stream_configuration(monkeypatch):
+    monkeypatch.setenv("STREAM_PROCESSOR", "volcengine")
+    monkeypatch.setenv("VOLCENGINE_APP_ID", "app-id")
+    monkeypatch.setenv("VOLCENGINE_ACCESS_TOKEN", "access-token")
+    monkeypatch.setenv("VOLCENGINE_RESOURCE_ID", "resource-id")
+    get_settings.cache_clear()
+
+    try:
+        settings = get_settings()
+        assert settings.stream_processor == "volcengine"
+        assert settings.volcengine_app_id == "app-id"
+        assert settings.volcengine_access_token == "access-token"
+        assert settings.volcengine_resource_id == "resource-id"
+        assert settings.volcengine_language == "zh-CN"
+    finally:
+        get_settings.cache_clear()
+
+
 def test_huggingface_api_key_is_preferred(monkeypatch):
     monkeypatch.setenv("HUGGINGFACE_API_KEY", "primary-token")
     monkeypatch.setenv("HF_TOKEN", "fallback-token")

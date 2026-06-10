@@ -48,6 +48,7 @@ from .stream_processing import (
 from .tasks import TaskManager
 from .remote_models import RemoteModelClient
 from .transcriber import ApiTranscriber, WhisperTranscriber
+from .volcengine_stream import VolcengineStreamProcessor
 
 configure_logging()
 logger = logging.getLogger(__name__)
@@ -209,6 +210,17 @@ def get_stream_session_manager() -> StreamSessionManager:
                 api_key=settings.stream_api_key,
                 timeout_seconds=settings.stream_api_timeout_seconds,
             )
+        )
+    elif processor_name in {"volcengine", "doubao"}:
+        processor = VolcengineStreamProcessor(
+            app_id=settings.volcengine_app_id or "",
+            access_token=settings.volcengine_access_token or "",
+            resource_id=settings.volcengine_resource_id,
+            endpoint=settings.volcengine_stream_endpoint,
+            language=settings.volcengine_language,
+            receive_timeout_seconds=settings.volcengine_receive_timeout_seconds,
+            final_timeout_seconds=settings.volcengine_final_timeout_seconds,
+            vad_end_window_ms=settings.volcengine_vad_end_window_ms,
         )
     elif processor_name in {"none", "disabled", "off"}:
         processor = None

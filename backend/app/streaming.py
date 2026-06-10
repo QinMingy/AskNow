@@ -67,6 +67,7 @@ class StreamSession:
     worker_future: Future | None = None
     transcript: TranscriptRevisionTracker | None = None
     processor_state: object | None = None
+    processor_finalized: bool = False
     refinement_attempted: bool = False
     created_at: datetime = field(default_factory=utc_now)
     updated_at: datetime = field(default_factory=utc_now)
@@ -453,8 +454,18 @@ class StreamSessionManager:
                     and self.finalizer is not None
                     and not session.refinement_attempted
                 )
+                should_finalize_processor = (
+                    session.state == "stopped"
+                    and self.processor is not None
+                    and hasattr(self.processor, "finalize_session")
+                    and not session.processor_finalized
+                )
+                if should_finalize_processor:
+                    session.processor_finalized = True
                 if should_refine:
                     session.refinement_attempted = True
+            if should_finalize_processor:
+                self._finalize_processor_session(session)
             if should_refine:
                 self._refine_complete_recording(session)
             if should_close:
@@ -572,6 +583,30 @@ class StreamSessionManager:
             self._publish(session, "processing_error", detail=str(exc))
         finally:
             self._publish(session, "processing_status", state="idle")
+
+    def _finalize_processor_session(self, session: StreamSession) -> None:
+        if session.transcript is None:
+            return
+        logger.info("stream.processor.finalize.start session_id=%s", session.session_id)
+        try:
+            segments = self.processor.finalize_session(state=session.processor_state)
+            newly_final = session.transcript.commit(segments, window_start_ms=0)
+            if newly_final:
+                self._publish(
+                    session,
+                    "transcript_final",
+                    revision=session.transcript.revision,
+                    segments=[item.model_dump(mode="json") for item in newly_final],
+                )
+        except Exception as exc:
+            logger.exception("stream.processor.finalize.failed session_id=%s", session.session_id)
+            self._publish(session, "processing_error", detail=str(exc))
+        else:
+            logger.info(
+                "stream.processor.finalize.complete session_id=%s segments=%s",
+                session.session_id,
+                len(segments),
+            )
 
     def _refine_complete_recording(self, session: StreamSession) -> None:
         if "pcm" not in session.mime_type.lower():

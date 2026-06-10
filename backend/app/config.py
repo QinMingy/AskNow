@@ -38,6 +38,16 @@ class Settings(BaseModel):
     stream_api_base_url: str | None = None
     stream_api_key: str | None = None
     stream_api_timeout_seconds: float = 120.0
+    volcengine_app_id: str | None = None
+    volcengine_access_token: str | None = None
+    volcengine_resource_id: str = "volc.bigasr.sauc.duration"
+    volcengine_stream_endpoint: str = (
+        "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel"
+    )
+    volcengine_language: str = "zh-CN"
+    volcengine_receive_timeout_seconds: float = 0.15
+    volcengine_final_timeout_seconds: float = 5.0
+    volcengine_vad_end_window_ms: int = 800
     stream_window_ms: int = 20000
     stream_process_interval_ms: int = 600
     funasr_stream_model: str = "paraformer-zh-streaming"
@@ -116,6 +126,26 @@ def get_settings() -> Settings:
         stream_api_base_url=os.getenv("STREAM_API_BASE_URL") or model_api_base_url,
         stream_api_key=os.getenv("STREAM_API_KEY") or model_api_key,
         stream_api_timeout_seconds=float(os.getenv("STREAM_API_TIMEOUT_SECONDS", "120")),
+        volcengine_app_id=os.getenv("VOLCENGINE_APP_ID"),
+        volcengine_access_token=os.getenv("VOLCENGINE_ACCESS_TOKEN"),
+        volcengine_resource_id=os.getenv(
+            "VOLCENGINE_RESOURCE_ID",
+            "volc.bigasr.sauc.duration",
+        ),
+        volcengine_stream_endpoint=os.getenv(
+            "VOLCENGINE_STREAM_ENDPOINT",
+            "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel",
+        ),
+        volcengine_language=os.getenv("VOLCENGINE_LANGUAGE", "zh-CN"),
+        volcengine_receive_timeout_seconds=float(
+            os.getenv("VOLCENGINE_RECEIVE_TIMEOUT_SECONDS", "0.15")
+        ),
+        volcengine_final_timeout_seconds=float(
+            os.getenv("VOLCENGINE_FINAL_TIMEOUT_SECONDS", "5")
+        ),
+        volcengine_vad_end_window_ms=int(
+            os.getenv("VOLCENGINE_VAD_END_WINDOW_MS", "800")
+        ),
         stream_window_ms=int(os.getenv("STREAM_WINDOW_MS", "20000")),
         stream_process_interval_ms=int(os.getenv("STREAM_PROCESS_INTERVAL_MS", "600")),
         funasr_stream_model=os.getenv("FUNASR_STREAM_MODEL", "paraformer-zh-streaming"),

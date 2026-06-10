@@ -50,3 +50,14 @@ def test_api_only_configuration_skips_local_model_dependencies(monkeypatch):
     assert "faster_whisper" not in modules
     assert "funasr" not in modules
     assert "pyannote.audio" not in modules
+
+
+def test_volcengine_stream_requires_websockets_but_not_funasr(monkeypatch):
+    monkeypatch.setenv("TRANSCRIPTION_PROVIDER", "api")
+    monkeypatch.setenv("DIARIZATION_PROVIDER", "api")
+    monkeypatch.setenv("STREAM_PROCESSOR", "volcengine")
+
+    modules = {module for module, _ in configured_dependencies()}
+
+    assert "websockets" in modules
+    assert "funasr" not in modules

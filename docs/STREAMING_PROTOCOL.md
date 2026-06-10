@@ -180,3 +180,13 @@ The WebSocket remains open while refinement runs, up to
 `STREAM_REFINEMENT_TIMEOUT_SECONDS`. This timeout is separate from the normal
 stream stop timeout because offline ASR and diarization can take longer for a
 long classroom recording.
+
+## Volcengine Doubao live provider
+
+Set `STREAM_PROCESSOR=volcengine` to replace local FunASR with Volcengine's
+native streaming big-model ASR. AskNow keeps its browser-facing WebSocket
+protocol unchanged and maintains one upstream Volcengine WebSocket per live
+session. Server-confirmed utterances are deduplicated before being committed to
+the subtitle list.
+
+See `docs/VOLCENGINE_STREAM_ASR_GUIDE.md` for credentials and configuration.
